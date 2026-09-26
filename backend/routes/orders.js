@@ -653,6 +653,91 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// POST /api/orders/lookup-by-pin - Securely locate an order by authentic PIN for drop-off intake
+router.post('/lookup-by-pin', async (req, res) => {
+  try {
+    const { pin } = req.body;
+    if (!pin) {
+      return res.status(400).json({ success: false, message: 'PIN is required' });
+    }
+    const cleanPin = String(pin).trim();
+
+    const order = await prisma.order.findFirst({
+      where: {
+        otp: cleanPin,
+        status: 'Accepted',
+      },
+      include: { store: true },
+    });
+
+    if (order) {
+      return res.json({ success: true, order: formatOrderOutput(order) });
+    }
+
+    // Check if order exists in other status for helpful feedback
+    const anyOrder = await prisma.order.findFirst({
+      where: { otp: cleanPin },
+      include: { store: true },
+    });
+
+    if (anyOrder) {
+      return res.json({
+        success: false,
+        order: formatOrderOutput(anyOrder),
+        status: anyOrder.status,
+        message: `Order #${anyOrder.id} is in "${anyOrder.status}" status.`,
+      });
+    }
+
+    return res.status(404).json({ success: false, message: `No order found with PIN "${cleanPin}".` });
+  } catch (err) {
+    console.error('Lookup by PIN error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to lookup order by PIN' });
+  }
+});
+
+// POST /api/orders/:id/verify-pin - Securely verify customer PIN directly against backend database
+router.post('/:id/verify-pin', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { pin } = req.body;
+
+    if (!pin) {
+      return res.status(400).json({ success: false, valid: false, message: 'PIN is required' });
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { id },
+      include: { store: true },
+    });
+
+    if (!order) {
+      return res.status(404).json({ success: false, valid: false, message: 'Order not found' });
+    }
+
+    const cleanInput = String(pin).trim();
+    const cleanStored = String(order.otp || '').trim();
+
+    if (!cleanStored || cleanInput !== cleanStored) {
+      return res.status(401).json({
+        success: false,
+        valid: false,
+        message: `Incorrect PIN "${cleanInput}". Check with customer.`,
+      });
+    }
+
+    return res.json({
+      success: true,
+      valid: true,
+      message: 'PIN verified successfully',
+      order: formatOrderOutput(order),
+    });
+  } catch (err) {
+    console.error('Verify PIN error:', err);
+    return res.status(500).json({ success: false, valid: false, error: 'Failed to verify PIN' });
+  }
+});
+
 // DELETE /api/orders/:id - Remove order
 router.delete('/:id', async (req, res) => {
   try {
