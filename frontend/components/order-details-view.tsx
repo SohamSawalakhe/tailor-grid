@@ -313,37 +313,8 @@ export function OrderDetailsView({ slugId = 'ORD-6154', onGoHome, onGoOrders }: 
   const [showStudioInfoModal, setShowStudioInfoModal] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const [isAuthOpen, setIsAuthOpen] = useState(false)
-  const [order, setOrder] = useState<any>(() => {
-    if (typeof window !== 'undefined' && slugId) {
-      try {
-        const cached = getStorageCookie(`tg_order_${slugId}`) || localStorage.getItem(`tg_order_${slugId}`)
-        if (cached) {
-          const parsed = JSON.parse(cached)
-          if (parsed && typeof parsed === 'object') return parsed
-        }
-        const latest = getStorageCookie('tg_latest_order')
-        if (latest) {
-          const parsed = JSON.parse(latest)
-          if (parsed && (parsed.id === slugId || !slugId)) return parsed
-        }
-      } catch {}
-    }
-    return null
-  })
-  const [isLoading, setIsLoading] = useState<boolean>(() => {
-    if (typeof window !== 'undefined' && slugId) {
-      try {
-        const cached = getStorageCookie(`tg_order_${slugId}`)
-        if (cached) return false
-        const latest = getStorageCookie('tg_latest_order')
-        if (latest) {
-          const parsed = JSON.parse(latest)
-          if (parsed && (parsed.id === slugId || !slugId)) return false
-        }
-      } catch {}
-    }
-    return true
-  })
+  const [order, setOrder] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState<boolean>(true)
   const [initialFetchDone, setInitialFetchDone] = useState(false)
   const [copiedToast, setCopiedToast] = useState(false)
   const [isSendingPinEmail, setIsSendingPinEmail] = useState(false)
@@ -408,6 +379,10 @@ export function OrderDetailsView({ slugId = 'ORD-6154', onGoHome, onGoOrders }: 
 
   useEffect(() => {
     let isMounted = true
+
+    setOrder(null)
+    setIsLoading(true)
+    setInitialFetchDone(false)
 
     async function loadOrderData(isInitial = false) {
       if (isInitial) setIsLoading(true)
@@ -867,7 +842,7 @@ export function OrderDetailsView({ slugId = 'ORD-6154', onGoHome, onGoOrders }: 
     )
   }
 
-  if ((isLoading && !order) || (!initialFetchDone && (!order || isAllocated))) {
+  if (!initialFetchDone || (isLoading && !order)) {
     return (
       <div className="min-h-[calc(100vh-68px)] flex items-center justify-center p-6 bg-[#FAF8F5]">
         <SewingLoader

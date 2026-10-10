@@ -16,7 +16,6 @@ import {
 import { toast } from 'react-toastify'
 import type { FittingBooking, Screen, User as UserType } from './data'
 import { fetchOrders, updateUserProfile } from '@/lib/api'
-import { setStorageCookie } from '@/lib/cookies'
 import { setStoredCity } from './use-city-location'
 import {
   getSavedAddresses,
@@ -319,44 +318,6 @@ export function ProfileView({ go, user, onUpdateUser, onOpenAuth, onSignOut }: P
 
         </form>
 
-        {/* Section 2: Recent Alterations (Minimal List) */}
-        {orders.length > 0 && (
-          <div className="pt-6 border-t border-[#E8E1D5] space-y-4">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-[#9E593B]">Recent Alterations</h2>
-
-            <div className="space-y-1 divide-y divide-[#EAE6DF]">
-              {orders.slice(0, 3).map((order) => (
-                <div
-                  key={order.id}
-                  onClick={() => {
-                    if (typeof window !== 'undefined') {
-                      try {
-                        localStorage.setItem(`tg_order_${order.id}`, JSON.stringify(order))
-                        setStorageCookie(`tg_order_${order.id}`, JSON.stringify(order))
-                      } catch {}
-                    }
-                    go(`/order/${order.id}`)
-                  }}
-                  className="py-3.5 flex items-center justify-between cursor-pointer group"
-                >
-                  <div>
-                    <p className="text-xs sm:text-sm font-bold text-[#18191B] group-hover:text-[#9E593B] transition-colors">
-                      {order.garmentName} &middot; <span className="font-normal text-[#7A7E85]">{order.serviceName}</span>
-                    </p>
-                    <p className="text-[11px] text-[#7A7E85] mt-0.5">#{order.id} &middot; {order.date}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs sm:text-sm font-bold text-[#18191B]">
-                      {(order as any).currencySymbol || '$'}{((order.price || 0) + ((order as any).priceAdjustment || 0)).toFixed(2)}
-                    </span>
-                    <span className="text-[10px] font-semibold text-[#9E593B]">{order.status || 'Active'}</span>
-                    <ChevronRight size={14} className="text-[#A1A4AB] group-hover:translate-x-0.5 transition-transform" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Section 3: View Saved Addresses */}
         <div className="pt-6 border-t border-[#E8E1D5] space-y-4">
