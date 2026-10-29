@@ -107,12 +107,16 @@ model PartnerStore {
   lng           Float
   distance      String?
   distanceMiles Float?
+  verificationStatus String    @default("UNSUBMITTED") // UNSUBMITTED, PENDING, APPROVED, REJECTED
+  verifiedAt         DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   orders Order[]
   pushSubscriptions PushSubscription[]
+  verifications StudioVerification[]
 
+  @@index([verificationStatus])
   @@index([area])
   @@index([postcode])
   @@index([email])
@@ -296,4 +300,25 @@ model DispatchSession {
   @@index([expiresAt])
   @@index([activeCandidateTailorIds], type: Gin)
   @@map("dispatch_sessions")
+}
+
+// One-time studio verification submission. Files live on local disk under uploads/verifications;
+// the columns hold paths relative to the uploads root. Rejected studios resubmit as a new row.
+model StudioVerification {
+  id              String       @id @default(cuid())
+  storeId         String
+  store           PartnerStore @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  shopFrontImage  String
+  interiorImage   String
+  machinesVideo   String
+  status          String       @default("PENDING") // PENDING, APPROVED, REJECTED
+  rejectionReason String?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([storeId])
+  @@index([status])
+  @@map("studio_verifications")
 }

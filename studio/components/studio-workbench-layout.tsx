@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { ToastContainer, toast } from 'react-toastify'
-import { makeOtp, type User } from '@/components/data'
+import { makeOtp, type User, type VerificationStatus } from '@/components/data'
 import { PartnerFlow } from '@/components/partner-flow'
 import { NormalLoader } from '@/components/normal-loader'
 import { getCurrentUser, CUSTOMER_SITE_URL, logoutUser, getCustomerSiteUrl } from '@/lib/api'
@@ -89,6 +89,25 @@ export function StudioWorkbenchLayout({ children }: { children?: ReactNode }) {
     }
   }, [loadingUser, user, customerSiteUrl])
 
+  // Once files are submitted (or the studio is already verified) the verification page is gone
+  useEffect(() => {
+    if (!user || user.role !== 'STUDIO') return
+    const status = user.verificationStatus || 'UNSUBMITTED'
+    if (pathname?.startsWith('/verification') && (status === 'PENDING' || status === 'APPROVED')) {
+      router.replace('/dashboard')
+    }
+  }, [user, pathname, router])
+
+  const handleVerificationStatusChange = (status: VerificationStatus, rejectionReason?: string | null) => {
+    setUser((prev) => {
+      if (!prev) return prev
+      const updated: User = { ...prev, verificationStatus: status, verificationRejectionReason: rejectionReason ?? null }
+      inMemoryUser = updated
+      setAuthUser(updated)
+      return updated
+    })
+  }
+
   const handleUpdateUser = (updated: User) => {
     setUser(updated)
     setAuthUser(updated)
@@ -153,8 +172,11 @@ export function StudioWorkbenchLayout({ children }: { children?: ReactNode }) {
               ? 'payouts'
               : pathname?.includes('settings') || pathname?.includes('profile')
               ? 'profile'
+              : pathname?.includes('verification')
+              ? 'verification'
               : 'cockpit'
           }
+          onVerificationStatusChange={handleVerificationStatusChange}
           onTabChange={(tab) => {
             const pathMap: Record<string, string> = {
               cockpit: '/dashboard',
@@ -162,6 +184,7 @@ export function StudioWorkbenchLayout({ children }: { children?: ReactNode }) {
               catalog: '/catalog',
               payouts: '/payouts',
               profile: '/settings',
+              verification: '/verification',
             }
             const target = pathMap[tab] || '/dashboard'
             if (pathname !== target) {

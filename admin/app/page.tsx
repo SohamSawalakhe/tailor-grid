@@ -58,6 +58,7 @@ import {
   fetchAdminInquiries,
   updateAdminInquiry,
   deleteAdminInquiry,
+  fetchPendingVerificationCount,
   searchAdminGlobal,
   loginSuperAdmin,
   checkSuperAdminSession,
@@ -71,8 +72,9 @@ import { CustomersTab } from '@/components/customers-tab'
 import { StudiosTab } from '@/components/studios-tab'
 import { OrdersTab } from '@/components/orders-tab'
 import { InquiriesTab } from '@/components/inquiries-tab'
+import { VerificationsTab } from '@/components/verifications-tab'
 
-export type AdminTab = 'overview' | 'customers' | 'studios' | 'orders' | 'inquiries'
+export type AdminTab = 'overview' | 'customers' | 'studios' | 'orders' | 'inquiries' | 'verifications'
 
 interface SuperAdminPageProps {
   initialTab?: AdminTab
@@ -113,6 +115,7 @@ export default function SuperAdminPage({ initialTab = 'overview' }: SuperAdminPa
       else if (p === '/studios') setActiveTab('studios')
       else if (p === '/orders') setActiveTab('orders')
       else if (p === '/inquiries') setActiveTab('inquiries')
+      else if (p === '/verifications') setActiveTab('verifications')
       else if (p === '/') setActiveTab('overview')
     }
     window.addEventListener('popstate', handlePopState)
@@ -124,6 +127,7 @@ export default function SuperAdminPage({ initialTab = 'overview' }: SuperAdminPa
     else if (pathname === '/studios') setActiveTab('studios')
     else if (pathname === '/orders') setActiveTab('orders')
     else if (pathname === '/inquiries') setActiveTab('inquiries')
+    else if (pathname === '/verifications') setActiveTab('verifications')
     else if (pathname === '/') setActiveTab('overview')
   }, [pathname])
 
@@ -225,19 +229,23 @@ export default function SuperAdminPage({ initialTab = 'overview' }: SuperAdminPa
 
   const [editingOrder, setEditingOrder] = useState<any | null>(null)
 
+  const [pendingVerificationCount, setPendingVerificationCount] = useState(0)
+
   // Load all foundational data
   const loadAllData = async (isSilent = false) => {
     if (!isSilent) setLoading(true)
     else setRefreshing(true)
 
     try {
-      const [overviewData, customersData, studiosData, ordersData, inquiriesData] = await Promise.all([
+      const [overviewData, customersData, studiosData, ordersData, inquiriesData, pendingVerifications] = await Promise.all([
         fetchAdminOverview(),
         fetchAdminCustomers('', 'ALL', 'CUSTOMER'),
         fetchAdminStudios(),
         fetchAdminOrders(),
         fetchAdminInquiries(),
+        fetchPendingVerificationCount(),
       ])
+      setPendingVerificationCount(pendingVerifications)
 
       if (overviewData) {
         setOverview(overviewData)
@@ -1223,6 +1231,25 @@ export default function SuperAdminPage({ initialTab = 'overview' }: SuperAdminPa
               </span>
             )}
           </button>
+
+          <button
+            onClick={() => handleTabSwitch('verifications')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'verifications'
+                ? 'bg-[#9E593B] text-white shadow-xs font-bold'
+                : 'text-[#1E2229] hover:text-black hover:bg-[#F3EFEA]'
+            }`}
+          >
+            <ShieldCheck size={14} />
+            <span>Studio Verifications</span>
+            {pendingVerificationCount > 0 && (
+              <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                activeTab === 'verifications' ? 'bg-amber-400 text-stone-900' : 'bg-amber-500 text-white animate-pulse'
+              }`}>
+                {pendingVerificationCount} PENDING
+              </span>
+            )}
+          </button>
         </div>
       </header>
 
@@ -1310,6 +1337,11 @@ export default function SuperAdminPage({ initialTab = 'overview' }: SuperAdminPa
                 handleTabSwitch('orders')
               }}
             />
+          )}
+
+          {/* ── TAB 6: STUDIO VERIFICATIONS ── */}
+          {activeTab === 'verifications' && (
+            <VerificationsTab onPendingCountChange={setPendingVerificationCount} />
           )}
         </div>
       </main>

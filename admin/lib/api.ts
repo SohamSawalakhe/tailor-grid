@@ -905,6 +905,84 @@ export async function deleteAdminInquiry(id: string): Promise<{ success: boolean
 }
 
 // -------------------------------------------------------------
+// STUDIO VERIFICATIONS
+// -------------------------------------------------------------
+export async function fetchAdminVerifications(
+  status?: string,
+  search?: string
+): Promise<{ verifications: any[]; statusCounts: Record<string, number> }> {
+  try {
+    const params = new URLSearchParams()
+    if (status && status !== 'ALL') params.append('status', status)
+    if (search) params.append('search', search)
+    const res = await adminFetch(getApiUrl(API_ROUTES.ADMIN.VERIFICATIONS(params.toString())), {
+      cache: 'no-store',
+    })
+    if (!res.ok) throw new Error('Failed to fetch studio verifications')
+    const data = await res.json()
+    return {
+      verifications: data.verifications || [],
+      statusCounts: data.statusCounts || { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 },
+    }
+  } catch (err) {
+    console.error('fetchAdminVerifications error:', err)
+    return { verifications: [], statusCounts: { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 } }
+  }
+}
+
+export async function fetchPendingVerificationCount(): Promise<number> {
+  try {
+    const res = await adminFetch(getApiUrl(API_ROUTES.ADMIN.VERIFICATIONS_COUNT), { cache: 'no-store' })
+    if (!res.ok) return 0
+    const data = await res.json()
+    return data.pending || 0
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Submission details. File links in `files` are API-relative signed paths; they are
+ * resolved to absolute URLs here so they can be used directly in <img>/<video>.
+ */
+export async function fetchAdminVerificationById(id: string): Promise<any | null> {
+  try {
+    const res = await adminFetch(getApiUrl(API_ROUTES.ADMIN.VERIFICATION_BY_ID(id)), { cache: 'no-store' })
+    if (!res.ok) return null
+    const data = await res.json()
+    const v = data.verification
+    if (!v) return null
+    if (v.files) {
+      v.files = Object.fromEntries(
+        Object.entries(v.files).map(([key, path]) => [key, getApiUrl(path as string)])
+      )
+    }
+    return v
+  } catch (err) {
+    console.error('fetchAdminVerificationById error:', err)
+    return null
+  }
+}
+
+export async function reviewAdminVerification(
+  id: string,
+  action: 'approve' | 'reject',
+  reason?: string
+): Promise<{ success: boolean; verification?: any; error?: string }> {
+  try {
+    const res = await adminFetch(getApiUrl(API_ROUTES.ADMIN.VERIFICATION_REVIEW(id, action)), {
+      method: 'POST',
+      body: JSON.stringify(action === 'reject' ? { reason } : {}),
+    })
+    const data = await res.json()
+    if (!res.ok) return { success: false, error: data.error || 'Failed to update verification' }
+    return { success: true, verification: data.verification }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
+// -------------------------------------------------------------
 // SUPER ADMIN AUTH & SESSION HELPERS
 // -------------------------------------------------------------
 const ADMIN_TOKEN_KEY = 'tg_super_admin_token'

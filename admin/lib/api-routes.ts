@@ -54,6 +54,11 @@ export const API_ROUTES = {
     SEARCH: (q: string) => `/admin/search?q=${encodeURIComponent(q.trim())}`,
     INQUIRIES: (params?: string) => params ? `/admin/inquiries?${params}` : '/admin/inquiries',
     INQUIRY_BY_ID: (id: string) => `/admin/inquiries/${encodeURIComponent(id)}`,
+    VERIFICATIONS: (params?: string) => params ? `/admin/verifications?${params}` : '/admin/verifications',
+    VERIFICATIONS_COUNT: '/admin/verifications/count',
+    VERIFICATION_BY_ID: (id: string) => `/admin/verifications/${encodeURIComponent(id)}`,
+    VERIFICATION_REVIEW: (id: string, action: 'approve' | 'reject') =>
+      `/admin/verifications/${encodeURIComponent(id)}/${action}`,
   },
 } as const
 

@@ -1,9 +1,9 @@
-const { Prisma } = require('@prisma/client');
-const { prisma } = require('../lib/prisma');
-const { calculateDistanceInMiles } = require('./locate.service');
-const { getRoadDistances } = require('./routing.service');
-const { sendOrderOtpEmail } = require('../lib/email');
-const pushService = require('./push.service');
+const { Prisma } = require("@prisma/client");
+const { prisma } = require("../lib/prisma");
+const { calculateDistanceInMiles } = require("./locate.service");
+const { getRoadDistances } = require("./routing.service");
+const { sendOrderOtpEmail } = require("../lib/email");
+const pushService = require("./push.service");
 
 const STAGE_CONFIG = [
   { stage: 1, minRadius: 0.0, maxRadius: 1.0, durationSec: 15 },
@@ -35,7 +35,10 @@ const MAX_WRITE_RETRIES = 5;
 const normId = (id) => String(id).trim().toLowerCase();
 
 function getStageConfig(stageNum) {
-  return STAGE_CONFIG.find((c) => c.stage === stageNum) || STAGE_CONFIG[STAGE_CONFIG.length - 1];
+  return (
+    STAGE_CONFIG.find((c) => c.stage === stageNum) ||
+    STAGE_CONFIG[STAGE_CONFIG.length - 1]
+  );
 }
 
 /**
@@ -44,7 +47,10 @@ function getStageConfig(stageNum) {
 function candidatesForStage(pool, declinedIds, stageNum) {
   const config = getStageConfig(stageNum);
   const declined = new Set(declinedIds);
-  return pool.filter((t) => !declined.has(normId(t.tailorId)) && t.distanceMiles <= config.maxRadius);
+  return pool.filter(
+    (t) =>
+      !declined.has(normId(t.tailorId)) && t.distanceMiles <= config.maxRadius,
+  );
 }
 
 function stageActivationData(pool, declinedIds, stageNum, now) {
@@ -66,7 +72,9 @@ function stageActivationData(pool, declinedIds, stageNum, now) {
  * Plain JSON copy for Json columns (Dates become ISO strings, undefined is dropped)
  */
 function toJson(value) {
-  return value === undefined || value === null ? Prisma.DbNull : JSON.parse(JSON.stringify(value));
+  return value === undefined || value === null
+    ? Prisma.DbNull
+    : JSON.parse(JSON.stringify(value));
 }
 
 /**
@@ -93,7 +101,9 @@ async function mutateSession(orderId, fn) {
       return result;
     }
   }
-  throw new Error(`Dispatch session ${orderId} is under heavy contention; please retry`);
+  throw new Error(
+    `Dispatch session ${orderId} is under heavy contention; please retry`,
+  );
 }
 
 /**
@@ -101,20 +111,22 @@ async function mutateSession(orderId, fn) {
  */
 function notifyStageCandidates(orderId, orderData, candidates) {
   candidates.forEach((candidate) => {
-    pushService.sendNotificationToStore(candidate.tailorId, {
-      title: `⚡ Incoming Dispatch: ${orderData.garmentName || 'Garment'}`,
-      body: `${orderData.serviceName || 'Alteration'} · ${candidate.distanceMiles ? candidate.distanceMiles.toFixed(1) : '0.2'} mi away · 15s to accept`,
-      url: `/?orderId=${orderId}&dispatch=true`,
-      tag: `dispatch-${orderId}`,
-      renotify: true,
-      data: {
-        orderId,
-        type: 'INCOMING_DISPATCH',
-        garment: orderData.garmentName,
-        service: orderData.serviceName,
-        payout: orderData.partnerPayout,
-      },
-    }).catch((err) => console.warn('Dispatch push notice:', err.message));
+    pushService
+      .sendNotificationToStore(candidate.tailorId, {
+        title: `⚡ Incoming Dispatch: ${orderData.garmentName || "Garment"}`,
+        body: `${orderData.serviceName || "Alteration"} · ${candidate.distanceMiles ? candidate.distanceMiles.toFixed(1) : "0.2"} mi away · 15s to accept`,
+        url: `/?orderId=${orderId}&dispatch=true`,
+        tag: `dispatch-${orderId}`,
+        renotify: true,
+        data: {
+          orderId,
+          type: "INCOMING_DISPATCH",
+          garment: orderData.garmentName,
+          service: orderData.serviceName,
+          payout: orderData.partnerPayout,
+        },
+      })
+      .catch((err) => console.warn("Dispatch push notice:", err.message));
   });
 }
 
@@ -122,17 +134,22 @@ function notifyStageCandidates(orderId, orderData, candidates) {
  * The time-based transition that is due for a session right now, if any
  */
 function computeDueTransition(row, now) {
-  if (row.status === 'SEARCHING') {
+  if (row.status === "SEARCHING") {
     if (now >= row.hardTimeoutAt.getTime()) {
       return {
-        data: { status: 'EXHAUSTED', activeCandidateTailorIds: [] },
+        data: { status: "EXHAUSTED", activeCandidateTailorIds: [] },
         log: `Reached hard ${HARD_TIMEOUT_SEC}s cap. Marked EXHAUSTED.`,
       };
     }
     if (now >= row.stageEndsAt.getTime()) {
       if (row.stage < STAGE_CONFIG.length) {
         const nextStage = row.stage + 1;
-        const { data, candidates } = stageActivationData(row.tailorPool, row.declinedTailorIds, nextStage, now);
+        const { data, candidates } = stageActivationData(
+          row.tailorPool,
+          row.declinedTailorIds,
+          nextStage,
+          now,
+        );
         return {
           data,
           notify: candidates,
@@ -140,15 +157,21 @@ function computeDueTransition(row, now) {
         };
       }
       return {
-        data: { status: 'EXHAUSTED', activeCandidateTailorIds: [] },
+        data: { status: "EXHAUSTED", activeCandidateTailorIds: [] },
         log: `All ${STAGE_CONFIG.length} stages exhausted. No tailor accepted.`,
       };
     }
   }
-  if (row.status === 'ACCEPTING' && now - row.updatedAt.getTime() >= ACCEPT_CLAIM_TIMEOUT_MS) {
+  if (
+    row.status === "ACCEPTING" &&
+    now - row.updatedAt.getTime() >= ACCEPT_CLAIM_TIMEOUT_MS
+  ) {
     return {
-      data: { status: now >= row.hardTimeoutAt.getTime() ? 'EXHAUSTED' : 'SEARCHING', acceptedTailorId: null },
-      log: 'Stale accept claim released.',
+      data: {
+        status: now >= row.hardTimeoutAt.getTime() ? "EXHAUSTED" : "SEARCHING",
+        acceptedTailorId: null,
+      },
+      log: "Stale accept claim released.",
     };
   }
   return null;
@@ -163,7 +186,8 @@ async function applyDueTransition(row, now = Date.now()) {
   const won = await casUpdate(row, transition.data);
   if (won) {
     console.log(`[Dispatch Engine] Order ${row.orderId} -> ${transition.log}`);
-    if (transition.notify) notifyStageCandidates(row.orderId, row.orderData, transition.notify);
+    if (transition.notify)
+      notifyStageCandidates(row.orderId, row.orderData, transition.notify);
   }
   return won;
 }
@@ -195,24 +219,38 @@ async function runDispatchSweep() {
     const due = await prisma.dispatchSession.findMany({
       where: {
         OR: [
-          { status: 'SEARCHING', OR: [{ stageEndsAt: { lte: new Date(now) } }, { hardTimeoutAt: { lte: new Date(now) } }] },
-          { status: 'ACCEPTING', updatedAt: { lte: new Date(now - ACCEPT_CLAIM_TIMEOUT_MS) } },
+          {
+            status: "SEARCHING",
+            OR: [
+              { stageEndsAt: { lte: new Date(now) } },
+              { hardTimeoutAt: { lte: new Date(now) } },
+            ],
+          },
+          {
+            status: "ACCEPTING",
+            updatedAt: { lte: new Date(now - ACCEPT_CLAIM_TIMEOUT_MS) },
+          },
         ],
       },
       take: 200,
     });
     for (const row of due) {
-      await applyDueTransition(row, now).catch((err) => console.warn('[Dispatch Engine] Sweep transition error:', err.message));
+      await applyDueTransition(row, now).catch((err) =>
+        console.warn("[Dispatch Engine] Sweep transition error:", err.message),
+      );
     }
 
     sweepCount = (sweepCount + 1) % CLEANUP_EVERY_N_SWEEPS;
     if (sweepCount === 0) {
       await prisma.dispatchSession.deleteMany({
-        where: { expiresAt: { lt: new Date(now) }, status: { notIn: ['SEARCHING', 'ACCEPTING'] } },
+        where: {
+          expiresAt: { lt: new Date(now) },
+          status: { notIn: ["SEARCHING", "ACCEPTING"] },
+        },
       });
     }
   } catch (err) {
-    console.warn('[Dispatch Engine] Sweep error:', err.message || err);
+    console.warn("[Dispatch Engine] Sweep error:", err.message || err);
   } finally {
     isSweeping = false;
   }
@@ -225,14 +263,26 @@ setInterval(runDispatchSweep, SWEEP_INTERVAL_MS).unref();
  * Helper to check if a studio catalog item matches the requested service
  */
 function matchesServiceItem(item, requestedService = {}) {
-  const reqServiceId = requestedService.serviceId ? String(requestedService.serviceId).toLowerCase().trim() : '';
-  const reqServiceName = requestedService.serviceName ? String(requestedService.serviceName).toLowerCase().trim() : '';
-  const reqGarmentId = requestedService.garmentId ? String(requestedService.garmentId).toLowerCase().trim() : '';
-  const reqCategoryId = requestedService.categoryId ? String(requestedService.categoryId).toLowerCase().trim() : '';
+  const reqServiceId = requestedService.serviceId
+    ? String(requestedService.serviceId).toLowerCase().trim()
+    : "";
+  const reqServiceName = requestedService.serviceName
+    ? String(requestedService.serviceName).toLowerCase().trim()
+    : "";
+  const reqGarmentId = requestedService.garmentId
+    ? String(requestedService.garmentId).toLowerCase().trim()
+    : "";
+  const reqCategoryId = requestedService.categoryId
+    ? String(requestedService.categoryId).toLowerCase().trim()
+    : "";
 
-  const itemServiceId = item.serviceId ? String(item.serviceId).toLowerCase().trim() : '';
-  const itemName = item.name ? String(item.name).toLowerCase().trim() : '';
-  const itemCatId = item.categoryId ? String(item.categoryId).toLowerCase().trim() : '';
+  const itemServiceId = item.serviceId
+    ? String(item.serviceId).toLowerCase().trim()
+    : "";
+  const itemName = item.name ? String(item.name).toLowerCase().trim() : "";
+  const itemCatId = item.categoryId
+    ? String(item.categoryId).toLowerCase().trim()
+    : "";
 
   // 1. Direct serviceId match
   if (reqServiceId && itemServiceId && reqServiceId === itemServiceId) {
@@ -243,7 +293,11 @@ function matchesServiceItem(item, requestedService = {}) {
     return true;
   }
   // 3. Category match fallback if serviceId/serviceName not specific or matching category
-  if ((reqGarmentId || reqCategoryId) && itemCatId && (reqGarmentId === itemCatId || reqCategoryId === itemCatId)) {
+  if (
+    (reqGarmentId || reqCategoryId) &&
+    itemCatId &&
+    (reqGarmentId === itemCatId || reqCategoryId === itemCatId)
+  ) {
     return true;
   }
   return false;
@@ -262,47 +316,55 @@ async function fetchEligible5MilePool(lat, lng, requestedService = {}) {
   const centerLat = parseFloat(lat);
   const centerLng = parseFloat(lng);
   if (isNaN(centerLat) || isNaN(centerLng)) {
-    throw new Error('Valid latitude and longitude required');
+    throw new Error("Valid latitude and longitude required");
   }
 
   const deltaLat = MAX_DISPATCH_MILES / 69.0;
-  const deltaLng = MAX_DISPATCH_MILES / (69.0 * Math.max(0.01, Math.cos((centerLat * Math.PI) / 180)));
+  const deltaLng =
+    MAX_DISPATCH_MILES /
+    (69.0 * Math.max(0.01, Math.cos((centerLat * Math.PI) / 180)));
 
   const [boxStores, studioUsers] = await Promise.all([
     prisma.partnerStore.findMany({
       where: {
-        status: { not: 'INACTIVE' },
+        // Only admin-verified, switched-on studios receive tailoring requests
+        verificationStatus: "APPROVED",
+        status: { not: "INACTIVE" },
         lat: { gte: centerLat - deltaLat, lte: centerLat + deltaLat },
         lng: { gte: centerLng - deltaLng, lte: centerLng + deltaLng },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
     }),
     prisma.user.findMany({
-      where: { role: 'STUDIO' },
-      select: { id: true, studioId: true, studioName: true, name: true, status: true },
+      where: { role: "STUDIO" },
+      select: {
+        id: true,
+        studioId: true,
+        studioName: true,
+        name: true,
+        status: true,
+      },
     }),
   ]);
 
   const inactiveStudioKeys = new Set(
     studioUsers
-      .filter((u) => u.status === 'INACTIVE')
-      .flatMap((u) => [u.id, u.studioId, u.studioName, u.name])
+      .filter((u) => u.status === "INACTIVE")
+      // Match by store id only: studio and tailor names are not unique
+      .flatMap((u) => [u.studioId])
       .filter(Boolean)
-      .map((k) => String(k).toLowerCase().trim())
+      .map((k) => String(k).toLowerCase().trim()),
   );
 
   const stores = boxStores.filter((store) => {
-    if (store.status === 'INACTIVE') return false;
-    const sId = (store.id || '').toLowerCase().trim();
-    const sName = (store.name || '').toLowerCase().trim();
-    const sLead = (store.leadTailor || '').toLowerCase().trim();
-    if (inactiveStudioKeys.has(sId) || inactiveStudioKeys.has(sName) || inactiveStudioKeys.has(sLead)) {
-      return false;
-    }
+    if (store.status === "INACTIVE") return false;
+    const sId = (store.id || "").toLowerCase().trim();
+    if (inactiveStudioKeys.has(sId)) return false;
     return (
-      typeof store.lat === 'number' &&
-      typeof store.lng === 'number' &&
-      calculateDistanceInMiles(centerLat, centerLng, store.lat, store.lng) <= MAX_DISPATCH_MILES
+      typeof store.lat === "number" &&
+      typeof store.lng === "number" &&
+      calculateDistanceInMiles(centerLat, centerLng, store.lat, store.lng) <=
+        MAX_DISPATCH_MILES
     );
   });
 
@@ -316,8 +378,8 @@ async function fetchEligible5MilePool(lat, lng, requestedService = {}) {
   const allCatalogItems = await prisma.studioCatalogItem.findMany({
     where: {
       OR: [
-        { studioId: { in: linkIds, mode: 'insensitive' } },
-        { userId: { in: linkIds, mode: 'insensitive' } },
+        { studioId: { in: linkIds, mode: "insensitive" } },
+        { userId: { in: linkIds, mode: "insensitive" } },
       ],
     },
     select: {
@@ -355,17 +417,28 @@ async function fetchEligible5MilePool(lat, lng, requestedService = {}) {
       ];
 
       // 1. Studio must have at least one active configured service
-      const hasAnyConfigured = storeCatalog.some((i) => i.enabled && Number(i.price) > 0);
+      const hasAnyConfigured = storeCatalog.some(
+        (i) => i.enabled && Number(i.price) > 0,
+      );
       if (!hasAnyConfigured) {
         return;
       }
 
       // 2. Check if the specific requested service is explicitly disabled by this studio
-      if (requestedService && (requestedService.serviceId || requestedService.serviceName || requestedService.garmentId)) {
-        const matchingItems = storeCatalog.filter((item) => matchesServiceItem(item, requestedService));
+      if (
+        requestedService &&
+        (requestedService.serviceId ||
+          requestedService.serviceName ||
+          requestedService.garmentId)
+      ) {
+        const matchingItems = storeCatalog.filter((item) =>
+          matchesServiceItem(item, requestedService),
+        );
         if (matchingItems.length > 0) {
           // If there are matching items, check if ANY are enabled with price > 0
-          const hasEnabledMatch = matchingItems.some((item) => item.enabled && Number(item.price) > 0);
+          const hasEnabledMatch = matchingItems.some(
+            (item) => item.enabled && Number(item.price) > 0,
+          );
           if (!hasEnabledMatch) {
             // All matches for this service are disabled (toggled off) -> EXCLUDE this studio!
             return;
@@ -382,35 +455,50 @@ async function fetchEligible5MilePool(lat, lng, requestedService = {}) {
   // 3. Road distance for the eligible shortlist only
   const roadDistances = await getRoadDistances(
     { lat: centerLat, lng: centerLng },
-    eligibleStores.map((store) => ({ id: store.id, lat: store.lat, lng: store.lng }))
+    eligibleStores.map((store) => ({
+      id: store.id,
+      lat: store.lat,
+      lng: store.lng,
+    })),
   );
 
   const pool = [];
   eligibleStores.forEach((store) => {
     const road = roadDistances.get(store.id);
-    const straightLineMiles = calculateDistanceInMiles(centerLat, centerLng, store.lat, store.lng);
+    const straightLineMiles = calculateDistanceInMiles(
+      centerLat,
+      centerLng,
+      store.lat,
+      store.lng,
+    );
     const roadMiles = road ? road.roadMiles : straightLineMiles;
     // Stage filtering and studio-facing distance use the road distance
     if (!Number.isFinite(roadMiles) || roadMiles > MAX_DISPATCH_MILES) return;
 
-    const durationMin = road && typeof road.durationSec === 'number' ? Math.round(road.durationSec / 60) : null;
+    const durationMin =
+      road && typeof road.durationSec === "number"
+        ? Math.round(road.durationSec / 60)
+        : null;
     const milesLabel = `${roadMiles.toFixed(1)} mi`;
     pool.push({
       tailorId: store.id,
-      name: store.name || 'Raffu Partner Atelier',
-      area: store.area || 'Neighborhood Studio',
-      address: store.address || '',
-      postcode: store.postcode || '',
+      name: store.name || "Raffu Partner Atelier",
+      area: store.area || "Neighborhood Studio",
+      address: store.address || "",
+      postcode: store.postcode || "",
       rating: store.rating || 4.96,
       reviewCount: store.reviewCount || 100,
-      specialties: store.specialties || ['Custom Alterations'],
-      phone: store.phone || '',
+      specialties: store.specialties || ["Custom Alterations"],
+      phone: store.phone || "",
       coords: { lat: store.lat, lng: store.lng },
       distanceMiles: roadMiles,
       straightLineMiles,
       travelMinutes: durationMin,
-      distanceSource: road ? road.source : 'straight-line',
-      distance: durationMin !== null ? `${milesLabel} · ${durationMin} min away` : `${milesLabel} away`,
+      distanceSource: road ? road.source : "straight-line",
+      distance:
+        durationMin !== null
+          ? `${milesLabel} · ${durationMin} min away`
+          : `${milesLabel} away`,
     });
   });
 
@@ -442,39 +530,56 @@ async function startOrderDispatch(order) {
   const partnerPayout = order.partnerPayout || parsedPrice;
   const otp = order.otp || String(Math.floor(1000 + Math.random() * 9000));
 
-  let measurementsStr = '';
+  let measurementsStr = "";
   if (order.measurements) {
-    measurementsStr = typeof order.measurements === 'object' ? JSON.stringify(order.measurements) : String(order.measurements);
+    measurementsStr =
+      typeof order.measurements === "object"
+        ? JSON.stringify(order.measurements)
+        : String(order.measurements);
   }
 
   const orderData = {
     id: orderId,
     userId: order.userId || null,
-    customerName: order.customerName || 'Customer',
+    customerName: order.customerName || "Customer",
     customerPhone: order.customerPhone || null,
-    customerEmail: order.customerEmail || '',
-    postcode: order.postcode || 'W8 4EP',
-    garmentId: order.garmentId || 'trousers',
-    garmentName: order.garmentName || 'Trousers & Jeans',
+    customerEmail: order.customerEmail || "",
+    postcode: order.postcode || "W8 4EP",
+    garmentId: order.garmentId || "trousers",
+    garmentName: order.garmentName || "Trousers & Jeans",
     quantity: order.quantity ? Math.max(1, parseInt(order.quantity, 10)) : 1,
-    serviceId: order.serviceId || 'trouser-hem',
-    serviceName: order.serviceName || 'Standard Hemming',
-    date: order.date || new Date().toISOString().split('T')[0],
-    timeSlot: order.timeSlot || '14:00 - 15:00',
-    garmentBrand: order.garmentBrand || '',
+    serviceId: order.serviceId || "trouser-hem",
+    serviceName: order.serviceName || "Standard Hemming",
+    date: order.date || new Date().toISOString().split("T")[0],
+    timeSlot: order.timeSlot || "14:00 - 15:00",
+    garmentBrand: order.garmentBrand || "",
     measurements: order.measurements || null,
-    fitNotes: order.fitNotes || order.notes || order.bookingNotes || measurementsStr || '',
-    pinnedAdjustment: measurementsStr || (typeof order.measurements === 'string' ? order.measurements : ''),
+    fitNotes:
+      order.fitNotes ||
+      order.notes ||
+      order.bookingNotes ||
+      measurementsStr ||
+      "",
+    pinnedAdjustment:
+      measurementsStr ||
+      (typeof order.measurements === "string" ? order.measurements : ""),
     price: parsedPrice,
     partnerPayout,
     otp,
     imageUrl: order.imageUrl || order.intakePhotoUrl || null,
   };
 
-  const status = tailorPool.length === 0 ? 'ZERO_TAILORS' : 'SEARCHING'; // SEARCHING, ACCEPTING, ASSIGNED, EXHAUSTED, ZERO_TAILORS, CANCELLED, SCHEDULED
-  const { data: stage1, candidates } = status === 'SEARCHING'
-    ? stageActivationData(tailorPool, [], 1, now)
-    : { data: { ...stageActivationData([], [], 1, now).data, activeCandidateTailorIds: [] }, candidates: [] };
+  const status = tailorPool.length === 0 ? "ZERO_TAILORS" : "SEARCHING"; // SEARCHING, ACCEPTING, ASSIGNED, EXHAUSTED, ZERO_TAILORS, CANCELLED, SCHEDULED
+  const { data: stage1, candidates } =
+    status === "SEARCHING"
+      ? stageActivationData(tailorPool, [], 1, now)
+      : {
+          data: {
+            ...stageActivationData([], [], 1, now).data,
+            activeCandidateTailorIds: [],
+          },
+          candidates: [],
+        };
 
   const sessionData = {
     status,
@@ -500,10 +605,10 @@ async function startOrderDispatch(order) {
     update: { ...sessionData, version: { increment: 1 } },
   });
 
-  if (status === 'SEARCHING') {
+  if (status === "SEARCHING") {
     console.log(
       `[Dispatch Engine] Order ${orderId} -> Stage 1 (${stage1.currentRadius} mi) activated. ` +
-      `Contacting ${candidates.length} tailors. Permanently excluded: 0`
+        `Contacting ${candidates.length} tailors. Permanently excluded: 0`,
     );
     notifyStageCandidates(orderId, orderData, candidates);
   }
@@ -519,39 +624,72 @@ async function recordTailorSkip(orderId, tailorId) {
 
   return mutateSession(orderId, (session) => {
     if (!session) {
-      return { result: { success: false, message: 'Dispatch session expired or not found' } };
+      return {
+        result: {
+          success: false,
+          message: "Dispatch session expired or not found",
+        },
+      };
     }
 
     const pool = session.tailorPool || [];
     const poolTailor = pool.find((t) => normId(t.tailorId) === cleanId);
     if (!poolTailor) {
       // Non-pooled tailor skipped, safely ignore so we don't skew the pool count
-      console.warn(`[Dispatch Engine] Non-pooled tailor ${cleanId} skipped Order ${orderId}. Ignored.`);
-      return { result: { success: true, message: 'Not an active candidate for this order.', status: formatStatus(session.status) } };
+      console.warn(
+        `[Dispatch Engine] Non-pooled tailor ${cleanId} skipped Order ${orderId}. Ignored.`,
+      );
+      return {
+        result: {
+          success: true,
+          message: "Not an active candidate for this order.",
+          status: formatStatus(session.status),
+        },
+      };
     }
 
-    const declined = Array.from(new Set([...session.declinedTailorIds, cleanId]));
-    const active = session.activeCandidateTailorIds.filter((id) => id !== cleanId);
-    const data = { declinedTailorIds: declined, activeCandidateTailorIds: active };
-    const logs = [`Tailor ${poolTailor.tailorId} SKIPPED Order ${orderId}. Excluded (${declined.length}/${pool.length}).`];
+    const declined = Array.from(
+      new Set([...session.declinedTailorIds, cleanId]),
+    );
+    const active = session.activeCandidateTailorIds.filter(
+      (id) => id !== cleanId,
+    );
+    const data = {
+      declinedTailorIds: declined,
+      activeCandidateTailorIds: active,
+    };
+    const logs = [
+      `Tailor ${poolTailor.tailorId} SKIPPED Order ${orderId}. Excluded (${declined.length}/${pool.length}).`,
+    ];
     let notify = null;
     let nextStatus = session.status;
 
-    if (session.status === 'SEARCHING') {
-      const allPoolDeclined = pool.every((t) => declined.includes(normId(t.tailorId)));
+    if (session.status === "SEARCHING") {
+      const allPoolDeclined = pool.every((t) =>
+        declined.includes(normId(t.tailorId)),
+      );
       if (allPoolDeclined) {
         // Instant Check 1: every tailor in the 5-mile pool declined -> end search immediately
-        data.status = 'EXHAUSTED';
+        data.status = "EXHAUSTED";
         data.activeCandidateTailorIds = [];
-        nextStatus = 'EXHAUSTED';
-        logs.push(`Order ${orderId} -> All ${pool.length} available tailors declined. Immediately ending search (EXHAUSTED).`);
+        nextStatus = "EXHAUSTED";
+        logs.push(
+          `Order ${orderId} -> All ${pool.length} available tailors declined. Immediately ending search (EXHAUSTED).`,
+        );
       } else if (active.length === 0 && session.stage < STAGE_CONFIG.length) {
         // Everyone in this stage declined: fast-forward to the next stage if it has anyone new
-        const next = stageActivationData(pool, declined, session.stage + 1, Date.now());
+        const next = stageActivationData(
+          pool,
+          declined,
+          session.stage + 1,
+          Date.now(),
+        );
         if (next.candidates.length > 0) {
           Object.assign(data, next.data);
           notify = next.candidates;
-          logs.push(`Order ${orderId} -> Current stage candidates all declined. Advancing immediately to Stage ${session.stage + 1}`);
+          logs.push(
+            `Order ${orderId} -> Current stage candidates all declined. Advancing immediately to Stage ${session.stage + 1}`,
+          );
         }
       }
     }
@@ -560,7 +698,7 @@ async function recordTailorSkip(orderId, tailorId) {
       data,
       result: {
         success: true,
-        message: 'Request skipped. Excluded from this order.',
+        message: "Request skipped. Excluded from this order.",
         remainingCandidates: data.activeCandidateTailorIds.length,
         status: formatStatus(nextStatus),
       },
@@ -578,21 +716,40 @@ async function recordTailorSkip(orderId, tailorId) {
 async function releaseAcceptClaim(orderId, tailorId) {
   const now = new Date();
   await prisma.dispatchSession.updateMany({
-    where: { orderId, status: 'ACCEPTING', acceptedTailorId: tailorId, hardTimeoutAt: { gt: now } },
-    data: { status: 'SEARCHING', acceptedTailorId: null, version: { increment: 1 } },
+    where: {
+      orderId,
+      status: "ACCEPTING",
+      acceptedTailorId: tailorId,
+      hardTimeoutAt: { gt: now },
+    },
+    data: {
+      status: "SEARCHING",
+      acceptedTailorId: null,
+      version: { increment: 1 },
+    },
   });
   await prisma.dispatchSession.updateMany({
-    where: { orderId, status: 'ACCEPTING', acceptedTailorId: tailorId, hardTimeoutAt: { lte: now } },
-    data: { status: 'EXHAUSTED', acceptedTailorId: null, activeCandidateTailorIds: [], version: { increment: 1 } },
+    where: {
+      orderId,
+      status: "ACCEPTING",
+      acceptedTailorId: tailorId,
+      hardTimeoutAt: { lte: now },
+    },
+    data: {
+      status: "EXHAUSTED",
+      acceptedTailorId: null,
+      activeCandidateTailorIds: [],
+      version: { increment: 1 },
+    },
   });
 }
 
 function alreadyAssignedResult(session) {
   return {
     success: false,
-    code: 'ORDER_ALREADY_ASSIGNED',
-    message: 'This order has already been accepted by another atelier.',
-    assignedStoreName: session?.acceptedTailor?.name || 'Another Atelier',
+    code: "ORDER_ALREADY_ASSIGNED",
+    message: "This order has already been accepted by another atelier.",
+    assignedStoreName: session?.acceptedTailor?.name || "Another Atelier",
   };
 }
 
@@ -601,26 +758,52 @@ function alreadyAssignedResult(session) {
  * instances), then the confirmed order is created in PostgreSQL.
  */
 async function recordTailorAccept(orderId, tailorId) {
+  // A studio whose verification was revoked mid-search must not claim the order
+  const acceptingStore = await prisma.partnerStore.findUnique({
+    where: { id: tailorId },
+    select: { verificationStatus: true },
+  });
+  if (acceptingStore && acceptingStore.verificationStatus !== "APPROVED") {
+    return {
+      success: false,
+      code: "STUDIO_NOT_VERIFIED",
+      message:
+        "Your studio must be verified before you can accept tailoring requests.",
+    };
+  }
+
   let session = await loadSession(orderId);
 
   if (session) {
-    if (session.status === 'ASSIGNED' || session.status === 'ACCEPTING') {
+    if (session.status === "ASSIGNED" || session.status === "ACCEPTING") {
       return alreadyAssignedResult(session);
     }
-    if (session.status !== 'SEARCHING') {
+    if (session.status !== "SEARCHING") {
       return {
         success: false,
-        code: 'REQUEST_EXPIRED',
-        message: 'This request is no longer available.',
+        code: "REQUEST_EXPIRED",
+        message: "This request is no longer available.",
       };
     }
-    const claimed = await casUpdate(session, { status: 'ACCEPTING', acceptedTailorId: tailorId });
+    const claimed = await casUpdate(session, {
+      status: "ACCEPTING",
+      acceptedTailorId: tailorId,
+    });
     if (!claimed) {
-      const latest = await prisma.dispatchSession.findUnique({ where: { orderId } });
-      if (latest && (latest.status === 'ASSIGNED' || latest.status === 'ACCEPTING')) {
+      const latest = await prisma.dispatchSession.findUnique({
+        where: { orderId },
+      });
+      if (
+        latest &&
+        (latest.status === "ASSIGNED" || latest.status === "ACCEPTING")
+      ) {
         return alreadyAssignedResult(latest);
       }
-      return { success: false, code: 'REQUEST_EXPIRED', message: 'This request is no longer available.' };
+      return {
+        success: false,
+        code: "REQUEST_EXPIRED",
+        message: "This request is no longer available.",
+      };
     }
   }
 
@@ -632,12 +815,19 @@ async function recordTailorAccept(orderId, tailorId) {
         include: { store: true },
       });
 
-      if (existingDbOrder && existingDbOrder.storeId && existingDbOrder.storeId !== tailorId) {
+      if (
+        existingDbOrder &&
+        existingDbOrder.storeId &&
+        existingDbOrder.storeId !== tailorId
+      ) {
         return {
           success: false,
-          code: 'ORDER_ALREADY_ASSIGNED',
-          message: 'This order has already been accepted by another atelier.',
-          assignedStoreName: existingDbOrder.store?.name || existingDbOrder.storeName || 'Another Atelier',
+          code: "ORDER_ALREADY_ASSIGNED",
+          message: "This order has already been accepted by another atelier.",
+          assignedStoreName:
+            existingDbOrder.store?.name ||
+            existingDbOrder.storeName ||
+            "Another Atelier",
         };
       }
 
@@ -647,11 +837,13 @@ async function recordTailorAccept(orderId, tailorId) {
       });
 
       if (!store) {
-        throw new Error('STORE_NOT_FOUND');
+        throw new Error("STORE_NOT_FOUND");
       }
 
       const oData = session?.orderData || {};
-      const customerCoords = session ? { lat: session.customerLat, lng: session.customerLng } : { lat: 51.5074, lng: -0.1278 };
+      const customerCoords = session
+        ? { lat: session.customerLat, lng: session.customerLng }
+        : { lat: 51.5074, lng: -0.1278 };
 
       // Look up all catalog items (both enabled and disabled) from the accepting studio
       const allStudioCatalogItems = await tx.studioCatalogItem.findMany({
@@ -670,42 +862,60 @@ async function recordTailorAccept(orderId, tailorId) {
           serviceName: oData.serviceName,
           garmentId: oData.garmentId,
         };
-        const matchingItems = allStudioCatalogItems.filter((item) => matchesServiceItem(item, orderSvc));
+        const matchingItems = allStudioCatalogItems.filter((item) =>
+          matchesServiceItem(item, orderSvc),
+        );
         if (matchingItems.length > 0) {
-          const hasEnabledMatch = matchingItems.some((item) => item.enabled && Number(item.price) > 0);
+          const hasEnabledMatch = matchingItems.some(
+            (item) => item.enabled && Number(item.price) > 0,
+          );
           if (!hasEnabledMatch) {
             return {
               success: false,
-              code: 'SERVICE_DISABLED',
-              message: 'You have disabled this alteration service in your Workshop Price Catalog.',
+              code: "SERVICE_DISABLED",
+              message:
+                "You have disabled this alteration service in your Workshop Price Catalog.",
             };
           }
         }
       }
 
-      const studioCatalogItems = allStudioCatalogItems.filter((item) => item.enabled && Number(item.price) > 0);
+      const studioCatalogItems = allStudioCatalogItems.filter(
+        (item) => item.enabled && Number(item.price) > 0,
+      );
 
       let calculatedPrice = oData.price ? parseFloat(oData.price) : 20;
-      let calculatedPayout = Number(oData.partnerPayout) || calculatedPrice * 0.75;
-      let studioCurrency = (store.currency && store.currency !== 'GBP' ? store.currency : 'USD');
-      let studioCurrencySymbol = (store.currency && store.currency !== 'GBP' ? store.currencySymbol : '$') || '$';
+      let calculatedPayout =
+        Number(oData.partnerPayout) || calculatedPrice * 0.75;
+      let studioCurrency =
+        store.currency && store.currency !== "GBP" ? store.currency : "USD";
+      let studioCurrencySymbol =
+        (store.currency && store.currency !== "GBP"
+          ? store.currencySymbol
+          : "$") || "$";
 
       if (studioCatalogItems.length > 0) {
-        if (studioCatalogItems[0].currency) studioCurrency = studioCatalogItems[0].currency;
-        if (studioCatalogItems[0].currencySymbol) studioCurrencySymbol = studioCatalogItems[0].currencySymbol;
+        if (studioCatalogItems[0].currency)
+          studioCurrency = studioCatalogItems[0].currency;
+        if (studioCatalogItems[0].currencySymbol)
+          studioCurrencySymbol = studioCatalogItems[0].currencySymbol;
 
         // Find match: by serviceId, or service name case-insensitive, or category
-        const matchedItem = studioCatalogItems.find((item) => matchesServiceItem(item, {
-          serviceId: oData.serviceId,
-          serviceName: oData.serviceName,
-          garmentId: oData.garmentId,
-        }));
+        const matchedItem = studioCatalogItems.find((item) =>
+          matchesServiceItem(item, {
+            serviceId: oData.serviceId,
+            serviceName: oData.serviceName,
+            garmentId: oData.garmentId,
+          }),
+        );
 
         if (matchedItem && Number(matchedItem.price) > 0) {
           calculatedPrice = Number(matchedItem.price);
-          calculatedPayout = Number(matchedItem.partnerPayout) || calculatedPrice * 0.75;
+          calculatedPayout =
+            Number(matchedItem.partnerPayout) || calculatedPrice * 0.75;
           if (matchedItem.currency) studioCurrency = matchedItem.currency;
-          if (matchedItem.currencySymbol) studioCurrencySymbol = matchedItem.currencySymbol;
+          if (matchedItem.currencySymbol)
+            studioCurrencySymbol = matchedItem.currencySymbol;
         }
       }
 
@@ -724,7 +934,7 @@ async function recordTailorAccept(orderId, tailorId) {
             partnerPayout: calculatedPayout,
             currency: studioCurrency,
             currencySymbol: studioCurrencySymbol,
-            status: 'Accepted',
+            status: "Accepted",
           },
           include: { store: true },
         });
@@ -733,37 +943,43 @@ async function recordTailorAccept(orderId, tailorId) {
           data: {
             id: orderId,
             userId: oData.userId || null,
-            customerName: oData.customerName || 'Valued Customer',
-            customerEmail: oData.customerEmail || 'customer@example.com',
+            customerName: oData.customerName || "Valued Customer",
+            customerEmail: oData.customerEmail || "customer@example.com",
             customerPhone: oData.customerPhone || null,
-            postcode: oData.postcode || 'W8 4EP',
+            postcode: oData.postcode || "W8 4EP",
             customerLat: customerCoords.lat,
             customerLng: customerCoords.lng,
             tailorLat: store.lat,
             tailorLng: store.lng,
-            garmentId: oData.garmentId || 'trousers',
-            garmentName: oData.garmentName || 'Trousers & Jeans',
-            quantity: oData.quantity ? Math.max(1, parseInt(oData.quantity, 10)) : 1,
-            serviceId: oData.serviceId || 'trouser-hem',
-            serviceName: oData.serviceName || 'Standard Hemming',
+            garmentId: oData.garmentId || "trousers",
+            garmentName: oData.garmentName || "Trousers & Jeans",
+            quantity: oData.quantity
+              ? Math.max(1, parseInt(oData.quantity, 10))
+              : 1,
+            serviceId: oData.serviceId || "trouser-hem",
+            serviceName: oData.serviceName || "Standard Hemming",
             storeId: store.id,
             storeName: store.name,
             storePhone: store.phone,
-            date: oData.date || new Date().toISOString().split('T')[0],
-            timeSlot: oData.timeSlot || '14:00 - 15:00',
-            garmentBrand: oData.garmentBrand || '',
-            fitNotes: oData.fitNotes || oData.notes || oData.bookingNotes || '',
-            pinnedAdjustment: oData.pinnedAdjustment || (typeof oData.measurements === 'object' ? JSON.stringify(oData.measurements) : (oData.measurements || '')),
-            sewingNotes: '',
+            date: oData.date || new Date().toISOString().split("T")[0],
+            timeSlot: oData.timeSlot || "14:00 - 15:00",
+            garmentBrand: oData.garmentBrand || "",
+            fitNotes: oData.fitNotes || oData.notes || oData.bookingNotes || "",
+            pinnedAdjustment:
+              oData.pinnedAdjustment ||
+              (typeof oData.measurements === "object"
+                ? JSON.stringify(oData.measurements)
+                : oData.measurements || ""),
+            sewingNotes: "",
             slaHours: 48,
             partnerPayout: calculatedPayout,
             retailSold: false,
             intakePhotoUrl: oData.imageUrl || null,
-            status: 'Accepted',
+            status: "Accepted",
             price: calculatedPrice,
             currency: studioCurrency,
             currencySymbol: studioCurrencySymbol,
-            otp: oData.otp || '1234',
+            otp: oData.otp || "1234",
           },
           include: { store: true },
         });
@@ -778,9 +994,9 @@ async function recordTailorAccept(orderId, tailorId) {
 
     if (result.success && session) {
       await prisma.dispatchSession.updateMany({
-        where: { orderId, status: 'ACCEPTING', acceptedTailorId: tailorId },
+        where: { orderId, status: "ACCEPTING", acceptedTailorId: tailorId },
         data: {
-          status: 'ASSIGNED',
+          status: "ASSIGNED",
           acceptedTailor: toJson(result.store),
           confirmedOrder: toJson(result.order),
           orderData: toJson({
@@ -794,7 +1010,9 @@ async function recordTailorAccept(orderId, tailorId) {
           version: { increment: 1 },
         },
       });
-      console.log(`[Dispatch Engine] Order ${orderId} successfully ACCEPTED & created in PostgreSQL for ${result.store.name} (${tailorId})`);
+      console.log(
+        `[Dispatch Engine] Order ${orderId} successfully ACCEPTED & created in PostgreSQL for ${result.store.name} (${tailorId})`,
+      );
     } else if (session) {
       await releaseAcceptClaim(orderId, tailorId);
     }
@@ -803,9 +1021,10 @@ async function recordTailorAccept(orderId, tailorId) {
       // 1. Asynchronously dispatch Web Push Notification to customer
       (async () => {
         try {
-          const storeName = result.store?.name || result.order.storeName || 'Partner Atelier';
-          const garmentName = result.order.garmentName || 'Garment';
-          const orderPin = result.order.otp ? ` PIN: ${result.order.otp}` : '';
+          const storeName =
+            result.store?.name || result.order.storeName || "Partner Atelier";
+          const garmentName = result.order.garmentName || "Garment";
+          const orderPin = result.order.otp ? ` PIN: ${result.order.otp}` : "";
 
           await pushService.sendNotificationToCustomer(result.order, {
             title: "🎉 Atelier Accepted Your Order!",
@@ -821,9 +1040,14 @@ async function recordTailorAccept(orderId, tailorId) {
               url: `/order/${result.order.id}`,
             },
           });
-          console.log(`[Push Notification] Dispatched order accepted alert to customer for #${result.order.id}`);
+          console.log(
+            `[Push Notification] Dispatched order accepted alert to customer for #${result.order.id}`,
+          );
         } catch (pushErr) {
-          console.warn('[Dispatch Engine] Error dispatching order accepted push:', pushErr.message || pushErr);
+          console.warn(
+            "[Dispatch Engine] Error dispatching order accepted push:",
+            pushErr.message || pushErr,
+          );
         }
       })();
 
@@ -832,19 +1056,28 @@ async function recordTailorAccept(orderId, tailorId) {
         try {
           let customerEmail = result.order.customerEmail;
           let customerName = result.order.customerName;
-          if ((!customerEmail || customerEmail.includes('example.com')) && result.order.userId) {
-            const user = await prisma.user.findUnique({ where: { id: result.order.userId } });
+          if (
+            (!customerEmail || customerEmail.includes("example.com")) &&
+            result.order.userId
+          ) {
+            const user = await prisma.user.findUnique({
+              where: { id: result.order.userId },
+            });
             if (user?.email) {
               customerEmail = user.email;
               if (user.name) customerName = user.name;
             }
           }
-          if (customerEmail && customerEmail.includes('@') && !customerEmail.includes('example.com')) {
+          if (
+            customerEmail &&
+            customerEmail.includes("@") &&
+            !customerEmail.includes("example.com")
+          ) {
             await sendOrderOtpEmail({
               toEmail: customerEmail,
               otp: result.order.otp,
               orderId: result.order.id,
-              customerName: customerName || 'Valued Customer',
+              customerName: customerName || "Valued Customer",
               garmentName: result.order.garmentName,
               serviceName: result.order.serviceName,
               storeName: result.store?.name || result.order.storeName,
@@ -853,7 +1086,10 @@ async function recordTailorAccept(orderId, tailorId) {
             });
           }
         } catch (emailErr) {
-          console.error('[Dispatch Engine] Error dispatching order OTP email:', emailErr.message || emailErr);
+          console.error(
+            "[Dispatch Engine] Error dispatching order OTP email:",
+            emailErr.message || emailErr,
+          );
         }
       })();
     }
@@ -866,8 +1102,8 @@ async function recordTailorAccept(orderId, tailorId) {
     }
     return {
       success: false,
-      code: 'SERVER_ERROR',
-      message: err.message || 'Failed to accept order',
+      code: "SERVER_ERROR",
+      message: err.message || "Failed to accept order",
     };
   }
 }
@@ -877,22 +1113,27 @@ async function recordTailorAccept(orderId, tailorId) {
  */
 async function cancelDispatch(orderId) {
   const { count } = await prisma.dispatchSession.deleteMany({
-    where: { orderId, status: { notIn: ['ACCEPTING', 'ASSIGNED'] } },
+    where: { orderId, status: { notIn: ["ACCEPTING", "ASSIGNED"] } },
   });
   if (count > 0) {
-    console.log(`[Dispatch Engine] Order ${orderId} CANCELLED by customer and removed from dispatch sessions.`);
+    console.log(
+      `[Dispatch Engine] Order ${orderId} CANCELLED by customer and removed from dispatch sessions.`,
+    );
   }
 
   // Also clean up any unaccepted allocated record from DB
   try {
     await prisma.order.deleteMany({
-      where: { id: orderId, status: 'Allocated' }
+      where: { id: orderId, status: "Allocated" },
     });
   } catch (err) {
     // Ignore if not in DB
   }
 
-  return { success: true, message: 'Dispatch search cancelled and cleared from server cache' };
+  return {
+    success: true,
+    message: "Dispatch search cancelled and cleared from server cache",
+  };
 }
 
 /**
@@ -903,6 +1144,12 @@ async function getPendingRequestsForTailor(tailorId) {
   const now = Date.now();
   const pending = [];
   const cleanTailorId = normId(tailorId);
+
+  const store = await prisma.partnerStore.findUnique({
+    where: { id: tailorId },
+    select: { verificationStatus: true },
+  });
+  if (store && store.verificationStatus !== "APPROVED") return [];
 
   // Fetch this studio's catalog items to ensure disabled services are never served in pending requests
   let disabledItems = [];
@@ -924,13 +1171,21 @@ async function getPendingRequestsForTailor(tailorId) {
         price: true,
       },
     });
-    disabledItems = catalogItems.filter((i) => i.enabled === false || Number(i.price) <= 0);
+    disabledItems = catalogItems.filter(
+      (i) => i.enabled === false || Number(i.price) <= 0,
+    );
   } catch (err) {
-    console.warn('[Dispatch Engine] Warning querying studio catalog in getPendingRequestsForTailor:', err.message);
+    console.warn(
+      "[Dispatch Engine] Warning querying studio catalog in getPendingRequestsForTailor:",
+      err.message,
+    );
   }
 
   const sessions = await prisma.dispatchSession.findMany({
-    where: { status: 'SEARCHING', activeCandidateTailorIds: { has: cleanTailorId } },
+    where: {
+      status: "SEARCHING",
+      activeCandidateTailorIds: { has: cleanTailorId },
+    },
   });
 
   for (const session of sessions) {
@@ -941,11 +1196,16 @@ async function getPendingRequestsForTailor(tailorId) {
     if (session.declinedTailorIds.includes(cleanTailorId)) continue;
 
     // 3. Find tailor info in session's 5-mile pool
-    const tailorInfo = (session.tailorPool || []).find((t) => normId(t.tailorId) === cleanTailorId);
+    const tailorInfo = (session.tailorPool || []).find(
+      (t) => normId(t.tailorId) === cleanTailorId,
+    );
     if (!tailorInfo) continue;
 
     // 4. Double check that tailor is strictly within currentRadius
-    if (typeof tailorInfo.distanceMiles === 'number' && tailorInfo.distanceMiles > session.currentRadius) {
+    if (
+      typeof tailorInfo.distanceMiles === "number" &&
+      tailorInfo.distanceMiles > session.currentRadius
+    ) {
       continue;
     }
 
@@ -957,13 +1217,18 @@ async function getPendingRequestsForTailor(tailorId) {
         serviceName: orderData.serviceName,
         garmentId: orderData.garmentId,
       };
-      const isServiceDisabled = disabledItems.some((item) => matchesServiceItem(item, orderSvc));
+      const isServiceDisabled = disabledItems.some((item) =>
+        matchesServiceItem(item, orderSvc),
+      );
       if (isServiceDisabled) {
         continue;
       }
     }
 
-    const stageSecondsRemaining = Math.max(0, Math.ceil((session.stageEndsAt.getTime() - now) / 1000));
+    const stageSecondsRemaining = Math.max(
+      0,
+      Math.ceil((session.stageEndsAt.getTime() - now) / 1000),
+    );
 
     pending.push({
       orderId: session.orderId,
@@ -1000,8 +1265,8 @@ async function getDispatchSessionStatus(orderId) {
   if (!session) {
     return {
       orderId,
-      status: 'NOT_FOUND',
-      message: 'No active dispatch session',
+      status: "NOT_FOUND",
+      message: "No active dispatch session",
     };
   }
   return formatSessionOutput(session);
@@ -1011,7 +1276,7 @@ async function getDispatchSessionStatus(orderId) {
  * ACCEPTING is internal: clients keep seeing SEARCHING until the order is confirmed
  */
 function formatStatus(status) {
-  return status === 'ACCEPTING' ? 'SEARCHING' : status;
+  return status === "ACCEPTING" ? "SEARCHING" : status;
 }
 
 /**
@@ -1019,8 +1284,14 @@ function formatStatus(status) {
  */
 function formatSessionOutput(session) {
   const now = Date.now();
-  const stageSecondsRemaining = Math.max(0, Math.ceil((session.stageEndsAt.getTime() - now) / 1000));
-  const totalSecondsElapsed = Math.max(0, Math.floor((now - session.startedAt.getTime()) / 1000));
+  const stageSecondsRemaining = Math.max(
+    0,
+    Math.ceil((session.stageEndsAt.getTime() - now) / 1000),
+  );
+  const totalSecondsElapsed = Math.max(
+    0,
+    Math.floor((now - session.startedAt.getTime()) / 1000),
+  );
 
   return {
     orderId: session.orderId,
@@ -1042,39 +1313,60 @@ function formatSessionOutput(session) {
 /**
  * Schedule fallback when customer schedules for later (Creates DB record)
  */
-async function scheduleOrderForLater(orderId, scheduledDate, scheduledTimeSlot) {
-  const session = await prisma.dispatchSession.findUnique({ where: { orderId } });
+async function scheduleOrderForLater(
+  orderId,
+  scheduledDate,
+  scheduledTimeSlot,
+) {
+  const session = await prisma.dispatchSession.findUnique({
+    where: { orderId },
+  });
   if (session) {
     await prisma.dispatchSession.updateMany({
-      where: { orderId, status: { notIn: ['ACCEPTING', 'ASSIGNED'] } },
-      data: { status: 'SCHEDULED', activeCandidateTailorIds: [], version: { increment: 1 } },
+      where: { orderId, status: { notIn: ["ACCEPTING", "ASSIGNED"] } },
+      data: {
+        status: "SCHEDULED",
+        activeCandidateTailorIds: [],
+        version: { increment: 1 },
+      },
     });
   }
 
   const oData = session?.orderData || {};
-  const customerCoords = session ? { lat: session.customerLat, lng: session.customerLng } : { lat: 51.5074, lng: -0.1278 };
+  const customerCoords = session
+    ? { lat: session.customerLat, lng: session.customerLng }
+    : { lat: 51.5074, lng: -0.1278 };
 
   // Resolve tailor coordinates from the store record if a store is already known
   let tailorLatVal = null;
   let tailorLngVal = null;
   if (oData.storeId) {
     try {
-      const store = await prisma.partnerStore.findUnique({ where: { id: oData.storeId } });
-      if (store && typeof store.lat === 'number' && typeof store.lng === 'number') {
+      const store = await prisma.partnerStore.findUnique({
+        where: { id: oData.storeId },
+      });
+      if (
+        store &&
+        typeof store.lat === "number" &&
+        typeof store.lng === "number"
+      ) {
         tailorLatVal = store.lat;
         tailorLngVal = store.lng;
       }
     } catch (e) {
-      console.warn('[Dispatch] Could not resolve store coords for scheduled order:', e.message);
+      console.warn(
+        "[Dispatch] Could not resolve store coords for scheduled order:",
+        e.message,
+      );
     }
   }
 
   const scheduledOrder = await prisma.order.upsert({
     where: { id: orderId },
     update: {
-      date: scheduledDate || new Date().toISOString().split('T')[0],
-      timeSlot: scheduledTimeSlot || '10:00 - 11:00',
-      status: 'Allocated',
+      date: scheduledDate || new Date().toISOString().split("T")[0],
+      timeSlot: scheduledTimeSlot || "10:00 - 11:00",
+      status: "Allocated",
       // ✅ Refresh customer coords on reschedule in case GPS updated
       customerLat: customerCoords.lat,
       customerLng: customerCoords.lng,
@@ -1084,38 +1376,42 @@ async function scheduleOrderForLater(orderId, scheduledDate, scheduledTimeSlot) 
     create: {
       id: orderId,
       userId: oData.userId || null,
-      customerName: oData.customerName || 'Valued Customer',
-      customerEmail: oData.customerEmail || 'customer@example.com',
+      customerName: oData.customerName || "Valued Customer",
+      customerEmail: oData.customerEmail || "customer@example.com",
       customerPhone: oData.customerPhone || null,
-      postcode: oData.postcode || 'W8 4EP',
+      postcode: oData.postcode || "W8 4EP",
       customerLat: customerCoords.lat,
       customerLng: customerCoords.lng,
       tailorLat: tailorLatVal,
       tailorLng: tailorLngVal,
-      garmentId: oData.garmentId || 'trousers',
-      garmentName: oData.garmentName || 'Trousers & Jeans',
-      serviceId: oData.serviceId || 'trouser-hem',
-      serviceName: oData.serviceName || 'Standard Hemming',
-      date: scheduledDate || new Date().toISOString().split('T')[0],
-      timeSlot: scheduledTimeSlot || '10:00 - 11:00',
-      garmentBrand: oData.garmentBrand || '',
-      fitNotes: oData.fitNotes || oData.notes || oData.bookingNotes || '',
-      pinnedAdjustment: oData.pinnedAdjustment || (typeof oData.measurements === 'object' ? JSON.stringify(oData.measurements) : (oData.measurements || '')),
-      sewingNotes: '',
+      garmentId: oData.garmentId || "trousers",
+      garmentName: oData.garmentName || "Trousers & Jeans",
+      serviceId: oData.serviceId || "trouser-hem",
+      serviceName: oData.serviceName || "Standard Hemming",
+      date: scheduledDate || new Date().toISOString().split("T")[0],
+      timeSlot: scheduledTimeSlot || "10:00 - 11:00",
+      garmentBrand: oData.garmentBrand || "",
+      fitNotes: oData.fitNotes || oData.notes || oData.bookingNotes || "",
+      pinnedAdjustment:
+        oData.pinnedAdjustment ||
+        (typeof oData.measurements === "object"
+          ? JSON.stringify(oData.measurements)
+          : oData.measurements || ""),
+      sewingNotes: "",
       slaHours: 48,
       partnerPayout: oData.partnerPayout || oData.price || 20,
       retailSold: false,
       intakePhotoUrl: oData.imageUrl || null,
-      status: 'Allocated',
+      status: "Allocated",
       price: oData.price || 20,
-      otp: oData.otp || '1234',
+      otp: oData.otp || "1234",
     },
     include: { store: true },
   });
 
   return {
     success: true,
-    message: 'Order scheduled for later slot successfully',
+    message: "Order scheduled for later slot successfully",
     order: scheduledOrder,
   };
 }

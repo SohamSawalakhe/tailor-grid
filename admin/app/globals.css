@@ -183,6 +183,63 @@ h4 {
   animation: pulseGlow 2s ease-in-out infinite;
 }
 
+/* ── Modal Smooth Entrance/Exit Animations ── */
+@keyframes modalEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes modalExit {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+}
+
+@keyframes backdropFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes backdropFadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.animate-modalEnter {
+  animation: modalEnter 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-modalExit {
+  animation: modalExit 0.18s ease-in forwards;
+}
+
+.animate-backdropEnter {
+  animation: backdropFadeIn 0.22s ease-out forwards;
+}
+
+.animate-backdropExit {
+  animation: backdropFadeOut 0.18s ease-in forwards;
+}
+
 /* ── Sidebar Transitions ── */
 .sidebar-transition {
   transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1),

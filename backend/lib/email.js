@@ -957,8 +957,75 @@ Submitted: ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })} I
   }
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Tell a studio partner the outcome of their one-time studio verification review.
+ */
+async function sendStudioVerificationEmail({ toEmail, studioName, approved, reason }) {
+  const client = getResendClient();
+  if (!client || !toEmail) {
+    return { success: false, error: "Email client or recipient missing" };
+  }
+
+  const studioUrl = (process.env.STUDIO_URL || "").replace(/\/$/, "");
+  const cleanName = escapeHtml((studioName || "your studio").trim());
+  const cleanReason = escapeHtml((reason || "").trim());
+
+  const subject = approved
+    ? "Your studio is verified - you can now receive tailoring requests"
+    : "Action needed: your studio verification was not approved";
+
+  const plainText = approved
+    ? `Good news! ${studioName || "Your studio"} has been verified on Raffu. You will now receive nearby tailoring requests.\n\n${studioUrl}/dashboard`
+    : `We could not approve the verification for ${studioName || "your studio"}.\n\nReason: ${reason || "Not specified"}\n\nPlease upload new files here: ${studioUrl}/verification`;
+
+  const html = `
+<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1C1917">
+  <h2 style="margin:0 0 12px;font-size:20px">${approved ? "Your studio is verified" : "Verification not approved"}</h2>
+  ${
+    approved
+      ? `<p style="font-size:14px;line-height:1.6">Good news! <strong>${cleanName}</strong> has been verified on Raffu. You will now receive nearby tailoring requests in your workbench.</p>`
+      : `<p style="font-size:14px;line-height:1.6">We could not approve the verification for <strong>${cleanName}</strong>.</p>
+         <p style="font-size:14px;line-height:1.6;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:12px"><strong>Reason:</strong> ${cleanReason || "Not specified"}</p>
+         <p style="font-size:14px;line-height:1.6">Please upload new photos and a machines video so we can review your studio again.</p>`
+  }
+  ${
+    studioUrl
+      ? `<p style="margin-top:20px"><a href="${studioUrl}${approved ? "/dashboard" : "/verification"}" style="background:#1C1917;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:bold">${approved ? "Open workbench" : "Upload again"}</a></p>`
+      : ""
+  }
+</div>`;
+
+  try {
+    const result = await client.emails.send({
+      from: getFromEmail(),
+      to: [toEmail],
+      subject,
+      html,
+      text: plainText,
+    });
+    if (result.error) {
+      console.error(`[VERIFICATION EMAIL ERROR] Resend rejected email to ${toEmail}:`, result.error);
+      return { success: false, error: result.error };
+    }
+    return { success: true, id: result.data?.id };
+  } catch (err) {
+    console.error(`[VERIFICATION EMAIL ERROR] Failed to send email to ${toEmail}:`, err.message || err);
+    return { success: false, error: err.message };
+  }
+}
+
 module.exports = {
   getResendClient,
+  sendStudioVerificationEmail,
   sendOrderOtpEmail,
   sendAuthOtpEmail,
   sendWelcomeEmail,

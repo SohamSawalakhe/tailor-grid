@@ -1,4 +1,4 @@
-import type { User, FittingBooking } from '../components/data'
+import type { User, FittingBooking, VerificationStatus } from '../components/data'
 import {
   getAuthToken,
   setAuthToken,
@@ -1238,4 +1238,76 @@ export async function deleteStudioCatalogItem(id: string, studioId?: string): Pr
     console.error('deleteStudioCatalogItem error:', err)
     throw err
   }
+}
+
+// ==========================================
+// STUDIO VERIFICATION
+// ==========================================
+
+export interface StudioVerificationState {
+  verificationStatus: VerificationStatus
+  rejectionReason: string | null
+  submittedAt: string | null
+}
+
+export async function fetchStudioVerification(): Promise<StudioVerificationState | null> {
+  const token = getAuthToken()
+  try {
+    const res = await fetch(getApiUrl(API_ROUTES.STUDIO.VERIFICATION), {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: 'include',
+      cache: 'no-store',
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return {
+      verificationStatus: data.verificationStatus,
+      rejectionReason: data.rejectionReason || null,
+      submittedAt: data.submittedAt || null,
+    }
+  } catch (err) {
+    console.error('fetchStudioVerification error:', err)
+    return null
+  }
+}
+
+/**
+ * Upload the shop front photo, interior photo and machines video in one multipart request.
+ * Uses XHR (not fetch) so the caller gets upload progress for the large video.
+ */
+export function submitStudioVerification(
+  files: { shopFrontImage: File; interiorImage: File; machinesVideo: File },
+  onProgress?: (percent: number) => void
+): Promise<{ success: boolean; verificationStatus?: VerificationStatus; error?: string }> {
+  return new Promise((resolve) => {
+    const form = new FormData()
+    form.append('shopFrontImage', files.shopFrontImage)
+    form.append('interiorImage', files.interiorImage)
+    form.append('machinesVideo', files.machinesVideo)
+
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', getApiUrl(API_ROUTES.STUDIO.VERIFICATION))
+    xhr.withCredentials = true
+    const token = getAuthToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100))
+    }
+    xhr.onload = () => {
+      let data: any = {}
+      try {
+        data = JSON.parse(xhr.responseText || '{}')
+      } catch {}
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve({ success: true, verificationStatus: data.verificationStatus })
+      } else {
+        resolve({ success: false, error: data.error || 'Upload failed. Please try again.', verificationStatus: data.verificationStatus })
+      }
+    }
+    xhr.onerror = () => resolve({ success: false, error: 'Network error while uploading. Please check your connection.' })
+    xhr.send(form)
+  })
 }

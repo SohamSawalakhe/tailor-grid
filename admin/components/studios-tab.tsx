@@ -241,6 +241,28 @@ export function StudiosTab({
 
               <div className="text-[11px] text-[#78716C] space-y-1 mb-2">
                 <p className="flex items-center justify-between">
+                  <span>Verification:</span>
+                  <strong
+                    className={`font-bold ${
+                      s.verificationStatus === 'APPROVED'
+                        ? 'text-emerald-700'
+                        : s.verificationStatus === 'PENDING'
+                        ? 'text-amber-700'
+                        : s.verificationStatus === 'REJECTED'
+                        ? 'text-rose-700'
+                        : 'text-[#78716C]'
+                    }`}
+                  >
+                    {s.verificationStatus === 'APPROVED'
+                      ? 'Verified'
+                      : s.verificationStatus === 'PENDING'
+                      ? 'Pending review'
+                      : s.verificationStatus === 'REJECTED'
+                      ? 'Rejected'
+                      : 'Not submitted'}
+                  </strong>
+                </p>
+                <p className="flex items-center justify-between">
                   <span>Lead Tailor:</span>
                   <strong className="text-[#1E2229] font-semibold">{s.leadTailor || 'Master Tailor'}</strong>
                 </p>

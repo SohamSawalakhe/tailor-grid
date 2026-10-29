@@ -41,3 +41,6 @@ __v0_jsx-dev-runtime.ts
 .turbo/
 .eslintcache
 *.tsbuildinfo
+
+# Uploaded studio verification files
+backend/uploads/

@@ -46,6 +46,7 @@ export const API_ROUTES = {
     CATALOG_ITEM: '/studio/catalog/item',
     CATALOG_ITEM_BY_ID: (id: string, query: string = '') =>
       `/studio/catalog/item/${encodeURIComponent(id)}${query}`,
+    VERIFICATION: '/studio/verification',
   },
   ADMIN: {
     LOGIN: '/admin/login',

@@ -55,7 +55,8 @@ router.get('/stores', async (req, res) => {
     const lng = parseFloat(req.query.lng);
     const radiusMiles = parseFloat(req.query.radiusMiles || '8.0') || 8.0;
 
-    const where = {};
+    // Customers only see admin-verified studios
+    const where = { verificationStatus: 'APPROVED' };
 
     // Only apply text filtering if explicit search or area is provided without lat/lng
     if (isNaN(lat) || isNaN(lng)) {
@@ -133,8 +134,10 @@ router.get('/stores', async (req, res) => {
           (u.name && u.name.toLowerCase() === s.leadTailor.toLowerCase())
       );
 
-      // Exclude stores that are inactive or whose linked studio partner is inactive
-      if (s.status === 'INACTIVE' || (matchingUser && matchingUser.status === 'INACTIVE')) {
+      // Exclude stores that are inactive or whose owning studio account is inactive.
+      // The owner is matched by store id only: name matches can belong to another studio.
+      const owner = studioUsers.find((u) => u.studioId === s.id);
+      if (s.status === 'INACTIVE' || (owner && owner.status === 'INACTIVE')) {
         continue;
       }
 

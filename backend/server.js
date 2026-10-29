@@ -12,6 +12,7 @@ const adminRoutes = require("./routes/admin");
 const newsletterRoutes = require("./routes/newsletter");
 const contactRoutes = require("./routes/contact");
 const pushRoutes = require("./routes/push");
+const verificationRoutes = require("./routes/verification");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -150,6 +151,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/push", pushRoutes);
+app.use("/api", verificationRoutes);
 app.use("/api", servicesRoutes);
 
 // Fallback 404 handler

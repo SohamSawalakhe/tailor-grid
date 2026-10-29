@@ -52,8 +52,9 @@ import {
   Zap,
   FileText,
 } from 'lucide-react'
-import { type FittingBooking, type OrderStatus, type Screen, type User as UserType } from './data'
-import { fetchStudioOrders, updateOrder, fetchPendingDispatches, respondToDispatch, logoutUser, fetchStudioCatalog, sendOtp, getCustomerSiteUrl, CUSTOMER_SITE_URL, updateStudioStatus, type PendingDispatchRequest, type StudioCatalogItemData } from '@/lib/api'
+import { type FittingBooking, type OrderStatus, type Screen, type User as UserType, type VerificationStatus } from './data'
+import { StudioVerificationView } from './studio-verification-view'
+import { fetchStudioOrders, updateOrder, updateStudioStatus, fetchPendingDispatches, respondToDispatch, logoutUser, fetchStudioCatalog, sendOtp, getCustomerSiteUrl, CUSTOMER_SITE_URL, type PendingDispatchRequest, type StudioCatalogItemData } from '@/lib/api'
 import { getStorageCookie, setStorageCookie, clearAllAuth, setCookie } from '@/lib/cookies'
 import { StudioProfileView } from './studio-profile-view'
 import { CustomSelect } from './custom-select'
@@ -65,7 +66,7 @@ import { RaffuLogo } from './raffu-logo'
 import { toast } from 'react-toastify'
 import { isPushSupported, subscribeToPush } from '@/lib/push-notifications'
 
-export type StudioTab = 'cockpit' | 'pipeline' | 'payouts' | 'profile' | 'catalog'
+export type StudioTab = 'cockpit' | 'pipeline' | 'payouts' | 'profile' | 'catalog' | 'verification'
 
 interface BroadcastRequest {
   id: string
@@ -251,6 +252,7 @@ interface PartnerFlowProps {
   onUpdateUser?: (updated: UserType) => void
   activeTab?: StudioTab
   onTabChange?: (tab: StudioTab) => void
+  onVerificationStatusChange?: (status: VerificationStatus, rejectionReason?: string | null) => void
 }
 
 function getSlaCountdown(job: FittingBooking): { text: string; urgent: boolean; percent: number } {
@@ -588,6 +590,8 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { id: 'catalog', label: 'Price Catalog', icon: Tag, shortLabel: 'Catalog', href: '/catalog' },
   { id: 'payouts', label: 'Earnings & Payouts', icon: CreditCard, shortLabel: 'Earnings', href: '/payouts' },
   { id: 'profile', label: 'Studio Settings', icon: Sliders, shortLabel: 'Settings', href: '/settings' },
+  // Shown only until the studio has submitted its verification files (see needsVerification)
+  { id: 'verification', label: 'Verify Your Studio', icon: ShieldCheck, shortLabel: 'Verify', href: '/verification' },
 ]
 
 export function PartnerFlow({
@@ -598,7 +602,12 @@ export function PartnerFlow({
   onUpdateUser,
   activeTab: controlledTab,
   onTabChange,
+  onVerificationStatusChange,
 }: PartnerFlowProps) {
+  const verificationStatus: VerificationStatus = user?.verificationStatus || 'UNSUBMITTED'
+  const needsVerification = user?.role === 'STUDIO' && (verificationStatus === 'UNSUBMITTED' || verificationStatus === 'REJECTED')
+  const visibleNavItems = NAV_ITEMS.filter((item) => item.id !== 'verification' || needsVerification)
+
   const rawStudioName = (user?.studioName || '').trim()
   const studioName =
     rawStudioName.length > 2 && rawStudioName.toLowerCase() !== 'x'
@@ -642,6 +651,7 @@ export function PartnerFlow({
     if (path.startsWith('/payouts') || path.startsWith('/earnings')) return 'payouts'
     if (path.startsWith('/settings') || path.startsWith('/profile')) return 'profile'
     if (path.startsWith('/dashboard')) return 'cockpit'
+    if (path.startsWith('/verification')) return 'verification'
     return null
   }
 
@@ -681,6 +691,7 @@ export function PartnerFlow({
     catalog: '/catalog',
     payouts: '/payouts',
     profile: '/settings',
+    verification: '/verification',
   }
 
   const setActiveTab = (tab: StudioTab) => {
@@ -692,18 +703,30 @@ export function PartnerFlow({
     }
   }
 
-  const [online, setOnline] = useState<boolean>(() => user?.status !== 'INACTIVE')
+  // A studio can only be switched on once an admin has verified it
+  const isVerified = verificationStatus === 'APPROVED'
+  const isStoreOn = isVerified && user?.storeStatus !== 'INACTIVE'
+  const [online, setOnline] = useState<boolean>(isStoreOn)
   const [isStatusUpdating, setIsStatusUpdating] = useState<boolean>(false)
 
-  // Sync online state whenever user?.status changes
+  // Sync online state whenever the store status or verification changes
   useEffect(() => {
-    if (user?.status) {
-      setOnline(user.status !== 'INACTIVE')
-    }
-  }, [user?.status])
+    setOnline(isStoreOn)
+  }, [isStoreOn])
 
   // Dedicated handler to toggle studio Active / Inactive live status
   const handleToggleActiveStatus = async () => {
+    if (!isVerified) {
+      toast.info(
+        verificationStatus === 'PENDING'
+          ? 'Your verification is under review. You can turn your store on once it is approved.'
+          : 'Please verify your studio first. Your store stays inactive until it is approved.',
+        { position: 'top-center', autoClose: 4000 }
+      )
+      if (needsVerification) setActiveTab('verification')
+      return
+    }
+
     if (!hasFilledCatalog) {
       toast.info('Please configure your Price Catalog first before making your studio active.', {
         position: 'top-center',
@@ -2560,7 +2583,7 @@ export function PartnerFlow({
 
         {/* Nav Items — The 4 Core Workshop Pillars */}
         <nav className="flex-1 p-3.5 pt-4 space-y-3 overflow-y-auto scrollbar-none">
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             const active = activeTab === item.id
             const Icon = item.icon
             const badge =
@@ -2594,6 +2617,9 @@ export function PartnerFlow({
                         }`}>
                         {badge}
                       </span>
+                    )}
+                    {item.id === 'verification' && (
+                      <span className="size-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
                     )}
                   </>
                 )}
@@ -2670,6 +2696,7 @@ export function PartnerFlow({
                 {activeTab === 'catalog' && 'Price Catalog'}
                 {activeTab === 'payouts' && 'Earnings & Payouts'}
                 {activeTab === 'profile' && 'Studio Settings'}
+                {activeTab === 'verification' && 'Verify Your Studio'}
               </h1>
               {!hasFilledCatalog ? (
                 <button
@@ -2689,8 +2716,11 @@ export function PartnerFlow({
                   type="button"
                   disabled={isStatusUpdating}
                   onClick={handleToggleActiveStatus}
+                  aria-disabled={!isVerified}
                   title={
-                    online
+                    !isVerified
+                      ? 'Store stays inactive until your studio is verified.'
+                      : online
                       ? 'Studio is ACTIVE: Visible to customers on Raffu map & bookings. Click to switch to Inactive (Offline).'
                       : 'Studio is INACTIVE: Hidden from customer map, searches & bookings. Click to switch to Active (Online).'
                   }
@@ -2698,7 +2728,7 @@ export function PartnerFlow({
                     online
                       ? 'bg-emerald-50 hover:bg-emerald-100/90 text-emerald-800 border-emerald-300/90 hover:border-emerald-400'
                       : 'bg-slate-100 hover:bg-slate-200/90 text-slate-700 border-slate-300/90 hover:border-slate-400'
-                  } ${isStatusUpdating ? 'opacity-70 cursor-wait' : ''}`}
+                  } ${isStatusUpdating ? 'opacity-70 cursor-wait' : ''} ${!isVerified ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
                   <span className="relative flex size-2">
                     {online ? (
@@ -2711,7 +2741,7 @@ export function PartnerFlow({
                     )}
                   </span>
                   <span className="tracking-tight">
-                    {online ? 'Store Active' : 'Store Inactive'}
+                    {online ? 'Store Active' : !isVerified ? 'Store Inactive · Not verified' : 'Store Inactive'}
                   </span>
                   {/* Miniature toggle switch indicator */}
                   <span
@@ -2734,6 +2764,7 @@ export function PartnerFlow({
               {activeTab === 'catalog' && 'Configure custom pricing, turnaround times, and alteration offerings'}
               {activeTab === 'payouts' && 'Track your daily earnings and direct payouts to your bank account'}
               {activeTab === 'profile' && 'Manage your shop details, opening hours, equipment, and contact info'}
+              {activeTab === 'verification' && 'Upload shop photos and a machines video to start receiving requests'}
             </span>
           </div>
 
@@ -3257,8 +3288,54 @@ export function PartnerFlow({
             {activeTab === 'cockpit' && (
               <div className="space-y-6 animate-fadeIn">
 
-                {/* ── Offline Status Alert Banner ── */}
-                {!online && (
+                {/* ── VERIFICATION STATUS BANNER (requests only flow to verified studios) ── */}
+                {user?.role === 'STUDIO' && verificationStatus !== 'APPROVED' && (
+                  <div
+                    className={`rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center gap-3 ${
+                      verificationStatus === 'PENDING'
+                        ? 'bg-blue-50 border-blue-200'
+                        : verificationStatus === 'REJECTED'
+                          ? 'bg-red-50 border-red-200'
+                          : 'bg-amber-50 border-amber-200'
+                    }`}
+                  >
+                    <div className="flex gap-3 items-start flex-1 min-w-0">
+                      {verificationStatus === 'PENDING' ? (
+                        <Clock size={20} className="text-blue-600 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertCircle size={20} className={`shrink-0 mt-0.5 ${verificationStatus === 'REJECTED' ? 'text-red-600' : 'text-amber-600'}`} />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900">
+                          {verificationStatus === 'PENDING' && 'Verification under review'}
+                          {verificationStatus === 'REJECTED' && 'Verification not approved'}
+                          {verificationStatus === 'UNSUBMITTED' && 'Verify your studio to start receiving requests'}
+                        </p>
+                        <p className="text-xs text-slate-600 mt-0.5 break-words">
+                          {verificationStatus === 'PENDING' &&
+                            "We're checking your shop photos and machines video. You'll start receiving tailoring requests once approved."}
+                          {verificationStatus === 'REJECTED' &&
+                            `Reason: ${user?.verificationRejectionReason || 'Not specified'}. Please upload new files.`}
+                          {verificationStatus === 'UNSUBMITTED' &&
+                            'Upload two shop photos and a short video of your machines. New requests are paused until your studio is verified.'}
+                        </p>
+                      </div>
+                    </div>
+                    {needsVerification && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('verification')}
+                        className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-[#9E593B] hover:bg-[#8A4D33] cursor-pointer shrink-0 flex items-center justify-center gap-1.5"
+                      >
+                        <ShieldCheck size={15} />
+                        {verificationStatus === 'REJECTED' ? 'Upload again' : 'Verify now'}
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Offline Status Alert Banner (unverified studios see the verification banner instead) ── */}
+                {isVerified && !online && (
                   <div className="bg-amber-50/90 border border-amber-200/90 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-900 shadow-2xs">
                     <div className="flex items-center gap-3">
                       <div className="size-10 rounded-xl bg-amber-100 border border-amber-300/70 flex items-center justify-center shrink-0 text-amber-700">
@@ -5266,12 +5343,22 @@ export function PartnerFlow({
               </div>
             )}
 
+            {/* ════════════════════════════════════════════════════════════════ */}
+            {/* TAB: ONE-TIME STUDIO VERIFICATION                               */}
+            {/* ════════════════════════════════════════════════════════════════ */}
+            {activeTab === 'verification' && needsVerification && (
+              <StudioVerificationView
+                user={user}
+                onStatusChange={(status, reason) => onVerificationStatusChange?.(status, reason)}
+              />
+            )}
+
           </div>
         </main>
 
         {/* ── MOBILE BOTTOM TAB BAR ── */}
         <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#E8E1D5] flex items-center justify-around h-16 safe-area-inset-bottom shadow-[0_-1px_12px_rgba(0,0,0,0.06)]">
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             const active = activeTab === item.id
             const Icon = item.icon
             const badge =

@@ -252,6 +252,36 @@ function setAuthCookies(res, tokens, req) {
   });
 }
 
+/**
+ * Find an existing partner store that a studio account without a studioId may adopt.
+ * Only stores matching the account's own email or phone, and not already owned by another
+ * account, qualify. Studio and tailor names are not unique, so they are never used: matching
+ * on them let new sign-ups take over (and overwrite) another studio's store.
+ */
+async function findClaimableStore({ email, phone, userId }) {
+  const identity = [
+    ...(email ? [{ email }] : []),
+    ...(phone ? [{ phone }] : []),
+  ];
+  if (identity.length === 0) return null;
+
+  const candidates = await prisma.partnerStore.findMany({
+    where: { OR: identity },
+    orderBy: { createdAt: "asc" },
+  });
+  for (const store of candidates) {
+    const otherOwner = await prisma.user.findFirst({
+      where: {
+        studioId: store.id,
+        ...(userId ? { NOT: { id: userId } } : {}),
+      },
+      select: { id: true },
+    });
+    if (!otherOwner) return store;
+  }
+  return null;
+}
+
 // Unified user resolution & creation helper directly in PostgreSQL
 async function findOrLinkUser({
   email,
@@ -336,15 +366,10 @@ async function findOrLinkUser({
         });
       }
       if (!existingStore) {
-        existingStore = await prisma.partnerStore.findFirst({
-          where: {
-            OR: [
-              ...(normEmail ? [{ email: normEmail }] : []),
-              ...(normPhone ? [{ phone: normPhone }] : []),
-              { name: actualStoreName },
-              { leadTailor: name || "" },
-            ],
-          },
+        existingStore = await findClaimableStore({
+          email: normEmail,
+          phone: normPhone,
+          userId: user?.id,
         });
         if (existingStore) {
           actualStudioId = existingStore.id;
@@ -1945,16 +1970,13 @@ async function enrichStudioUser(user) {
         where: { id: user.studioId },
       });
     }
-    if (!store && (user.studioName || user.name)) {
-      store = await prisma.partnerStore.findFirst({
-        where: {
-          OR: [
-            ...(user.studioName ? [{ name: user.studioName }] : []),
-            { leadTailor: user.name },
-          ],
-        },
+    if (!store && !user.studioId) {
+      store = await findClaimableStore({
+        email: user.email,
+        phone: user.phone,
+        userId: user.id,
       });
-      if (store && !user.studioId) {
+      if (store) {
         await prisma.user.update({
           where: { id: user.id },
           data: { studioId: store.id },
@@ -1963,8 +1985,24 @@ async function enrichStudioUser(user) {
     }
 
     if (store) {
+      let verificationRejectionReason = null;
+      if (store.verificationStatus === "REJECTED") {
+        const latest = await prisma.studioVerification.findFirst({
+          where: { storeId: store.id },
+          orderBy: { createdAt: "desc" },
+          select: { rejectionReason: true },
+        });
+        verificationRejectionReason = latest?.rejectionReason || null;
+      }
       return {
         ...user,
+        verificationStatus: store.verificationStatus || "UNSUBMITTED",
+        verificationRejectionReason,
+        // Live on/off switch; an unverified store is always reported as off
+        storeStatus:
+          store.verificationStatus === "APPROVED" && store.status !== "INACTIVE"
+            ? "ACTIVE"
+            : "INACTIVE",
         email: user.email || store.email || null,
         phone: user.phone || store.phone || null,
         address: user.address || store.address || null,
@@ -1998,67 +2036,61 @@ async function enrichStudioUser(user) {
 // POST /api/auth/status - Update or toggle studio partner live active/inactive status
 router.post("/status", async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    let userId = null;
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      try {
-        const decoded = jwt.verify(authHeader.split(" ")[1], JWT_SECRET);
-        userId = decoded.id;
-      } catch (e) {}
+    // Identity comes only from the authenticated session, never from the request body
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ error: "Unauthorized: please sign in again." });
     }
 
-    const { status, id } = req.body || {};
-    let targetId = userId || id;
-
-    if (!targetId && req.cookies && req.cookies.tg_auth_token) {
-      try {
-        const decoded = jwt.verify(req.cookies.tg_auth_token, JWT_SECRET);
-        targetId = decoded.id;
-      } catch (e) {}
-    }
-
-    if (!targetId) {
-      return res.status(401).json({ error: "Unauthorized: missing user identity." });
-    }
-
+    const { status } = req.body || {};
     const currentUser = await prisma.user.findUnique({
-      where: { id: targetId },
+      where: { id: req.user.id },
     });
     if (!currentUser) {
       return res.status(404).json({ error: "User not found." });
     }
-
-    let nextStatus = status ? String(status).toUpperCase().trim() : (currentUser.status === "ACTIVE" ? "INACTIVE" : "ACTIVE");
-    if (nextStatus !== "ACTIVE" && nextStatus !== "INACTIVE") {
-      nextStatus = "ACTIVE";
+    if (currentUser.role !== "STUDIO" || !currentUser.studioId) {
+      return res.status(403).json({ error: "Only onboarded studio partners can change store status." });
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { id: targetId },
-      data: { status: nextStatus },
+    const store = await prisma.partnerStore.findUnique({
+      where: { id: currentUser.studioId },
+      select: { id: true, status: true, verificationStatus: true },
     });
-
-    // Sync status to partner store as well
-    if (currentUser.studioId) {
-      try {
-        await prisma.partnerStore.update({
-          where: { id: currentUser.studioId },
-          data: { status: nextStatus },
-        });
-      } catch (e) {}
-    } else if (currentUser.studioName || currentUser.name) {
-      try {
-        await prisma.partnerStore.updateMany({
-          where: {
-            OR: [
-              ...(currentUser.studioName ? [{ name: currentUser.studioName }] : []),
-              { leadTailor: currentUser.name },
-            ],
-          },
-          data: { status: nextStatus },
-        });
-      } catch (e) {}
+    if (!store) {
+      return res.status(404).json({ error: "Studio profile not found." });
     }
+
+    const currentlyActive = store.status !== "INACTIVE";
+    let nextStatus = status
+      ? String(status).toUpperCase().trim()
+      : currentlyActive ? "INACTIVE" : "ACTIVE";
+    if (nextStatus !== "ACTIVE" && nextStatus !== "INACTIVE") {
+      return res.status(400).json({ error: "Status must be ACTIVE or INACTIVE." });
+    }
+
+    // A studio can only go live once an admin has verified it
+    if (nextStatus === "ACTIVE" && store.verificationStatus !== "APPROVED") {
+      return res.status(403).json({
+        error:
+          store.verificationStatus === "PENDING"
+            ? "Your verification is under review. You can turn your store on once it is approved."
+            : "Please verify your studio before turning your store on.",
+        code: "STUDIO_NOT_VERIFIED",
+        verificationStatus: store.verificationStatus,
+      });
+    }
+
+    // The store's status is the on/off switch. The account itself is only ever moved back to
+    // ACTIVE here: an INACTIVE studio account is treated as unfinished onboarding at login.
+    const [, updatedUser] = await prisma.$transaction([
+      prisma.partnerStore.update({
+        where: { id: store.id },
+        data: { status: nextStatus },
+      }),
+      nextStatus === "ACTIVE"
+        ? prisma.user.update({ where: { id: currentUser.id }, data: { status: "ACTIVE" } })
+        : prisma.user.findUnique({ where: { id: currentUser.id } }),
+    ]);
 
     const enrichedUser = await enrichStudioUser(updatedUser);
 
@@ -2233,17 +2265,11 @@ router.post("/update-profile", async (req, res) => {
             where: { id: user.studioId },
           });
         }
-        if (!store) {
-          store = await prisma.partnerStore.findFirst({
-            where: {
-              OR: [
-                ...(user.studioName ? [{ name: user.studioName }] : []),
-                ...(studioName ? [{ name: String(studioName).trim() }] : []),
-                ...(user.email ? [{ email: user.email }] : []),
-                ...(user.phone ? [{ phone: user.phone }] : []),
-                { leadTailor: user.name },
-              ],
-            },
+        if (!store && !user.studioId) {
+          store = await findClaimableStore({
+            email: user.email,
+            phone: user.phone,
+            userId: user.id,
           });
         }
 
@@ -2395,7 +2421,11 @@ router.post("/update-profile", async (req, res) => {
           }
           if (status !== undefined) {
             const cleanStatus = String(status).toUpperCase().trim();
-            if (cleanStatus === "ACTIVE" || cleanStatus === "INACTIVE") {
+            // Unverified studios can't switch their store on (same rule as POST /status)
+            if (
+              cleanStatus === "INACTIVE" ||
+              (cleanStatus === "ACTIVE" && store.verificationStatus === "APPROVED")
+            ) {
               storeUpdateData.status = cleanStatus;
             }
           }
@@ -2522,14 +2552,11 @@ router.get("/me", async (req, res) => {
             where: { id: user.studioId },
           });
         }
-        if (!store && (user.studioName || user.name)) {
-          store = await prisma.partnerStore.findFirst({
-            where: {
-              OR: [
-                ...(user.studioName ? [{ name: user.studioName }] : []),
-                { leadTailor: user.name },
-              ],
-            },
+        if (!store && !user.studioId) {
+          store = await findClaimableStore({
+            email: user.email,
+            phone: user.phone,
+            userId: user.id,
           });
         }
         if (store) {

@@ -3,7 +3,9 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { prisma } = require('../lib/prisma');
 const { verifyPassword, hashPassword } = require('../lib/password');
-const { sendWelcomeEmail } = require('../lib/email');
+const { sendWelcomeEmail, sendStudioVerificationEmail } = require('../lib/email');
+const { sendNotificationToStore } = require('../services/push.service');
+const { getSignedFilePath } = require('../services/verification-storage.service');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -703,6 +705,8 @@ router.get('/studios', async (req, res) => {
         totalOrdersCount: s.orders.length,
         totalPayoutEarned: Math.round(totalPayoutEarned * 100) / 100,
         utilization,
+        verificationStatus: s.verificationStatus,
+        verifiedAt: s.verifiedAt,
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
       };
@@ -1278,5 +1282,210 @@ router.delete('/inquiries/:id', async (req, res) => {
     return res.status(500).json({ error: 'Failed to delete inquiry' });
   }
 });
+
+// ==========================================
+// STUDIO VERIFICATIONS
+// ==========================================
+
+const VERIFICATION_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'];
+
+const VERIFICATION_STORE_SELECT = {
+  id: true,
+  name: true,
+  area: true,
+  address: true,
+  postcode: true,
+  phone: true,
+  email: true,
+  leadTailor: true,
+  machines: true,
+  workers: true,
+  verificationStatus: true,
+};
+
+function formatVerification(v, { withFiles = false } = {}) {
+  return {
+    id: v.id,
+    storeId: v.storeId,
+    status: v.status,
+    rejectionReason: v.rejectionReason,
+    reviewedById: v.reviewedById,
+    reviewedAt: v.reviewedAt,
+    createdAt: v.createdAt,
+    studio: v.store || null,
+    ...(withFiles
+      ? {
+          files: {
+            shopFrontImage: getSignedFilePath(v.id, 'shopFrontImage'),
+            interiorImage: getSignedFilePath(v.id, 'interiorImage'),
+            machinesVideo: getSignedFilePath(v.id, 'machinesVideo'),
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * Email + push the studio about the review outcome. Never throws: a failed notification
+ * must not undo an approval or rejection.
+ */
+async function notifyStudioOfVerification(store, approved, reason) {
+  try {
+    const owner = await prisma.user.findFirst({
+      where: { studioId: store.id, role: 'STUDIO' },
+      select: { email: true },
+    });
+    const toEmail = owner?.email || store.email;
+    if (toEmail) {
+      await sendStudioVerificationEmail({ toEmail, studioName: store.name, approved, reason });
+    }
+    await sendNotificationToStore(store.id, {
+      title: approved ? '✅ Studio verified' : '⚠️ Verification not approved',
+      body: approved
+        ? 'You will now receive nearby tailoring requests.'
+        : `Reason: ${reason}. Please upload new files.`,
+      url: approved ? '/dashboard' : '/verification',
+      tag: 'studio-verification',
+      data: { type: 'STUDIO_VERIFICATION', status: approved ? 'APPROVED' : 'REJECTED' },
+    });
+  } catch (err) {
+    console.warn('Studio verification notification failed:', err.message);
+  }
+}
+
+// GET /api/admin/verifications/count - Pending count for the sidebar badge
+router.get('/verifications/count', async (req, res) => {
+  try {
+    const pending = await prisma.studioVerification.count({ where: { status: 'PENDING' } });
+    return res.json({ success: true, pending });
+  } catch (err) {
+    console.error('Admin verification count error:', err);
+    return res.status(500).json({ error: 'Failed to count verifications' });
+  }
+});
+
+// GET /api/admin/verifications?status=PENDING&search=
+router.get('/verifications', async (req, res) => {
+  try {
+    const { status, search } = req.query;
+    const where = {};
+    if (status && VERIFICATION_STATUSES.includes(status)) {
+      where.status = status;
+    }
+    if (search && search.trim()) {
+      const q = search.trim();
+      where.store = {
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { area: { contains: q, mode: 'insensitive' } },
+          { postcode: { contains: q, mode: 'insensitive' } },
+          { phone: { contains: q, mode: 'insensitive' } },
+          { email: { contains: q, mode: 'insensitive' } },
+        ],
+      };
+    }
+
+    const [verifications, grouped] = await Promise.all([
+      prisma.studioVerification.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        include: { store: { select: VERIFICATION_STORE_SELECT } },
+      }),
+      prisma.studioVerification.groupBy({ by: ['status'], _count: { id: true } }),
+    ]);
+
+    const statusCounts = { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 };
+    grouped.forEach((g) => {
+      statusCounts[g.status] = g._count.id;
+      statusCounts.ALL += g._count.id;
+    });
+
+    return res.json({
+      success: true,
+      verifications: verifications.map((v) => formatVerification(v)),
+      statusCounts,
+    });
+  } catch (err) {
+    console.error('Admin fetch verifications error:', err);
+    return res.status(500).json({ error: 'Failed to fetch studio verifications' });
+  }
+});
+
+// GET /api/admin/verifications/:id - Submission details with signed file links
+router.get('/verifications/:id', async (req, res) => {
+  try {
+    const verification = await prisma.studioVerification.findUnique({
+      where: { id: req.params.id },
+      include: { store: { select: VERIFICATION_STORE_SELECT } },
+    });
+    if (!verification) {
+      return res.status(404).json({ error: 'Verification not found' });
+    }
+    return res.json({ success: true, verification: formatVerification(verification, { withFiles: true }) });
+  } catch (err) {
+    console.error('Admin fetch verification error:', err);
+    return res.status(500).json({ error: 'Failed to fetch verification' });
+  }
+});
+
+// POST /api/admin/verifications/:id/approve | /reject  { reason }
+async function reviewVerification(req, res, approved) {
+  try {
+    const { id } = req.params;
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (!approved && !reason) {
+      return res.status(400).json({ error: 'A rejection reason is required so the studio knows what to fix.' });
+    }
+
+    const now = new Date();
+    const result = await prisma.$transaction(async (tx) => {
+      // Only a still-pending submission can be reviewed, so two admins can't both act on it
+      const updated = await tx.studioVerification.updateMany({
+        where: { id, status: 'PENDING' },
+        data: {
+          status: approved ? 'APPROVED' : 'REJECTED',
+          rejectionReason: approved ? null : reason,
+          reviewedById: req.admin.id,
+          reviewedAt: now,
+        },
+      });
+      if (updated.count === 0) return null;
+
+      const verification = await tx.studioVerification.findUnique({ where: { id } });
+      const store = await tx.partnerStore.update({
+        where: { id: verification.storeId },
+        // Approval puts the store live; a rejected store stays switched off
+        data: approved
+          ? { verificationStatus: 'APPROVED', verifiedAt: now, status: 'ACTIVE' }
+          : { verificationStatus: 'REJECTED', verifiedAt: null, status: 'INACTIVE' },
+        select: VERIFICATION_STORE_SELECT,
+      });
+      if (approved) {
+        await tx.user.updateMany({
+          where: { studioId: store.id, role: 'STUDIO' },
+          data: { status: 'ACTIVE' },
+        });
+      }
+      return { ...verification, store };
+    });
+
+    if (!result) {
+      const existing = await prisma.studioVerification.findUnique({ where: { id }, select: { status: true } });
+      if (!existing) return res.status(404).json({ error: 'Verification not found' });
+      return res.status(409).json({ error: `This verification was already ${existing.status.toLowerCase()}.` });
+    }
+
+    notifyStudioOfVerification(result.store, approved, reason);
+
+    return res.json({ success: true, verification: formatVerification(result) });
+  } catch (err) {
+    console.error('Admin review verification error:', err);
+    return res.status(500).json({ error: 'Failed to update verification' });
+  }
+}
+
+router.post('/verifications/:id/approve', (req, res) => reviewVerification(req, res, true));
+router.post('/verifications/:id/reject', (req, res) => reviewVerification(req, res, false));
 
 module.exports = router;

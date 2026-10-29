@@ -138,16 +138,26 @@ export function StudioProfileView({
   const [lat, setLat] = useState<number | null>(user?.lat ?? null)
   const [lng, setLng] = useState<number | null>(user?.lng ?? null)
   const [avatar, setAvatar] = useState(user?.avatar || '')
-  const [studioStatus, setStudioStatus] = useState<'ACTIVE' | 'INACTIVE'>(() => (user?.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE'))
+  // A studio can only be switched on once an admin has verified it
+  const isVerified = user?.verificationStatus === 'APPROVED'
+  const storeStatus: 'ACTIVE' | 'INACTIVE' = isVerified && user?.storeStatus !== 'INACTIVE' ? 'ACTIVE' : 'INACTIVE'
+  const [studioStatus, setStudioStatus] = useState<'ACTIVE' | 'INACTIVE'>(storeStatus)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
 
   useEffect(() => {
-    if (user?.status) {
-      setStudioStatus(user.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE')
-    }
-  }, [user?.status])
+    setStudioStatus(storeStatus)
+  }, [storeStatus])
 
   const handleToggleStatus = async () => {
+    if (!isVerified) {
+      toast.info(
+        user?.verificationStatus === 'PENDING'
+          ? 'Your verification is under review. You can turn your store on once it is approved.'
+          : 'Please verify your studio first. Your store stays inactive until it is approved.',
+        { position: 'top-center', autoClose: 4000 }
+      )
+      return
+    }
     if (isUpdatingStatus) return
     setIsUpdatingStatus(true)
     const nextStatus = studioStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
@@ -748,10 +758,17 @@ export function StudioProfileView({
                       <h2 className="text-base sm:text-xl font-serif font-bold text-[#1E2229] truncate max-w-[200px] sm:max-w-none">
                         {studioName || 'Your Atelier Name'}
                       </h2>
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
-                        <span className="size-1.5 rounded-full bg-emerald-500" />
-                        Verified Atelier
-                      </span>
+                      {isVerified ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
+                          <span className="size-1.5 rounded-full bg-emerald-500" />
+                          Verified Atelier
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
+                          <span className="size-1.5 rounded-full bg-amber-500" />
+                          {user?.verificationStatus === 'PENDING' ? 'Verification Pending' : 'Not Verified'}
+                        </span>
+                      )}
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold border shrink-0 transition-colors ${
                         studioStatus === 'INACTIVE'
                           ? 'bg-slate-100 text-slate-700 border-slate-300'

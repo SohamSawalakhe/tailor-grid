@@ -36,7 +36,13 @@ export type User = {
   leadTailor?: string | null
   currency?: string | null
   currencySymbol?: string | null
+  verificationStatus?: VerificationStatus
+  // Live on/off switch of the studio's store (always INACTIVE until verified)
+  storeStatus?: 'ACTIVE' | 'INACTIVE'
+  verificationRejectionReason?: string | null
 }
+
+export type VerificationStatus = 'UNSUBMITTED' | 'PENDING' | 'APPROVED' | 'REJECTED'
 
 export type StoreOption = {
   id: string
